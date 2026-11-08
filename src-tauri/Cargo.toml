@@ -28,6 +28,7 @@ keyring = { version = "3", features = ["apple-native"] }
 reqwest = { version = "0.13.5", features = ["json", "multipart"] }
 tokio = { version = "1.54.1", features = ["sync", "time", "macros", "rt-multi-thread"] }
 rubato = "5.0.1"
+cpal = "0.18.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
