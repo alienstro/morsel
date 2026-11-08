@@ -23,6 +23,8 @@
     "allow-model-status",
     "allow-download-model",
     "allow-write-notes",
-    "allow-cancel-notes"
+    "allow-cancel-notes",
+    "allow-export-note",
+    "dialog:allow-save"
   ]
 }

@@ -1,5 +1,7 @@
 import { Outlet, Route, Routes } from "react-router";
 import { MeetingScreen } from "../screens/meeting/MeetingScreen";
+import { NoteScreen } from "../screens/note/NoteScreen";
+import { WritingScreen } from "../screens/note/WritingScreen";
 import { AppShell } from "./AppShell";
 
 function ComingSoon() {
@@ -21,8 +23,8 @@ export function AppRoutes() {
       <Route path="/meeting/:id" element={<MeetingScreen />} />
       <Route element={<ShellLayout />}>
         <Route path="/" element={<ComingSoon />} />
-        <Route path="/meeting/:id/writing" element={<ComingSoon />} />
-        <Route path="/note/:id" element={<ComingSoon />} />
+        <Route path="/meeting/:id/writing" element={<WritingScreen />} />
+        <Route path="/note/:id" element={<NoteScreen />} />
         <Route path="/settings/models" element={<ComingSoon />} />
         <Route path="*" element={<ComingSoon />} />
       </Route>

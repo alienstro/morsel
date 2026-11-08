@@ -291,6 +291,19 @@ impl AppState {
         }
     }
 
+    /// Writes the note as a Markdown file at `path`, which the user picked in a save dialog.
+    pub fn export_note(&self, meeting_id: MeetingId, path: &std::path::Path) -> Result<()> {
+        let detail = self.get_meeting(meeting_id)?;
+        let note = detail
+            .note
+            .ok_or_else(|| MorselError::NotFound(format!("note of meeting {meeting_id}")))?;
+        std::fs::write(
+            path,
+            format!("# {}\n\n{}\n", detail.summary.title, note.trim_end()),
+        )?;
+        Ok(())
+    }
+
     pub async fn test_notes_key(&self) -> Result<()> {
         let model = self.settings()?.notes_model;
         llm::test_key(&self.http, &self.notes_config(&model)?).await
@@ -396,6 +409,15 @@ pub async fn write_notes(
 #[tauri::command]
 pub async fn cancel_notes(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<bool> {
     Ok(state.cancel_notes(meeting_id))
+}
+
+#[tauri::command]
+pub async fn export_note(
+    state: State<'_, AppState>,
+    meeting_id: MeetingId,
+    path: PathBuf,
+) -> Result<()> {
+    state.export_note(meeting_id, &path)
 }
 
 #[tauri::command]
@@ -509,6 +531,32 @@ mod tests {
         s.stop_meeting().await.unwrap();
         assert!(matches!(s.write_notes(id, 1), Err(MorselError::Invalid(_))));
         assert!(!s.cancel_notes(id));
+    }
+
+    #[test]
+    fn export_note_writes_markdown_file() {
+        let (dir, s) = state();
+        let id =
+            crate::db::meetings::create_meeting(&s.db.lock().unwrap(), "Weekly sync", 1).unwrap();
+        crate::db::meetings::save_note(&s.db.lock().unwrap(), id, "## Summary\n- budget ok", "m")
+            .unwrap();
+        let path = dir.path().join("out.md");
+        s.export_note(id, &path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# Weekly sync\n\n## Summary\n- budget ok\n"
+        );
+    }
+
+    #[test]
+    fn export_without_note_is_an_error() {
+        let (dir, s) = state();
+        let id =
+            crate::db::meetings::create_meeting(&s.db.lock().unwrap(), "Weekly sync", 1).unwrap();
+        assert!(matches!(
+            s.export_note(id, &dir.path().join("x.md")),
+            Err(MorselError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

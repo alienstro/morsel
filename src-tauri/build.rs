@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "has_api_key",
     "write_notes",
     "cancel_notes",
+    "export_note",
     "test_notes_key",
     "model_status",
     "download_model",

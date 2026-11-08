@@ -30,25 +30,28 @@ impl<R: Runtime> EventSink for TauriSink<R> {
 
 /// Adds the Morsel commands to a Tauri builder.
 pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
-    builder.invoke_handler(tauri::generate_handler![
-        commands::start_meeting,
-        commands::pause_meeting,
-        commands::resume_meeting,
-        commands::stop_meeting,
-        commands::save_user_notes,
-        commands::get_meeting,
-        commands::list_meetings,
-        commands::list_templates,
-        commands::get_settings,
-        commands::save_settings,
-        commands::set_api_key,
-        commands::has_api_key,
-        commands::write_notes,
-        commands::cancel_notes,
-        commands::test_notes_key,
-        commands::model_status,
-        commands::download_model,
-    ])
+    builder
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::start_meeting,
+            commands::pause_meeting,
+            commands::resume_meeting,
+            commands::stop_meeting,
+            commands::save_user_notes,
+            commands::get_meeting,
+            commands::list_meetings,
+            commands::list_templates,
+            commands::get_settings,
+            commands::save_settings,
+            commands::set_api_key,
+            commands::has_api_key,
+            commands::write_notes,
+            commands::cancel_notes,
+            commands::export_note,
+            commands::test_notes_key,
+            commands::model_status,
+            commands::download_model,
+        ])
 }
 
 /// Opens the database, marks interrupted meetings, and creates the app state.
