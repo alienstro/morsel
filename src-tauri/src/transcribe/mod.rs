@@ -1,6 +1,8 @@
 //! Speech to text for one chunk: local Parakeet or a cloud endpoint.
 
 pub mod cloud;
+pub mod model_download;
+pub mod parakeet;
 
 use crate::audio::PIPELINE_RATE;
 #[cfg(test)]
