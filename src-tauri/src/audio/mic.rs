@@ -34,11 +34,24 @@ pub struct MicSource {
 impl MicSource {
     /// The real microphone: cpal, default input device, device check each second.
     pub fn default_device() -> Self {
-        Self::with_parts(Box::new(CpalInputFactory), Box::new(CpalInputWatcher::new()), Duration::from_secs(1))
+        Self::with_parts(
+            Box::new(CpalInputFactory),
+            Box::new(CpalInputWatcher::new()),
+            Duration::from_secs(1),
+        )
     }
 
-    pub fn with_parts(factory: Box<dyn StreamFactory>, watcher: Box<dyn DeviceWatcher>, poll: Duration) -> Self {
-        Self { parts: Some((factory, watcher)), poll, stop_tx: None, thread: None }
+    pub fn with_parts(
+        factory: Box<dyn StreamFactory>,
+        watcher: Box<dyn DeviceWatcher>,
+        poll: Duration,
+    ) -> Self {
+        Self {
+            parts: Some((factory, watcher)),
+            poll,
+            stop_tx: None,
+            thread: None,
+        }
     }
 }
 
@@ -52,8 +65,10 @@ fn sink_for(tx: &Sender<Vec<f32>>) -> SampleSink {
 
 impl AudioSource for MicSource {
     fn start(&mut self, tx: Sender<Vec<f32>>) -> Result<()> {
-        let (mut factory, mut watcher) =
-            self.parts.take().ok_or_else(|| MorselError::Audio("the microphone source was already used".into()))?;
+        let (mut factory, mut watcher) = self
+            .parts
+            .take()
+            .ok_or_else(|| MorselError::Audio("the microphone source was already used".into()))?;
         let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let poll = self.poll;
@@ -153,7 +168,11 @@ impl StreamFactory for CpalInputFactory {
                 on_error,
                 None,
             ),
-            other => return Err(MorselError::Audio(format!("the microphone format {other:?} is not supported"))),
+            other => {
+                return Err(MorselError::Audio(format!(
+                    "the microphone format {other:?} is not supported"
+                )));
+            }
         }
         .map_err(map_cpal_error)?;
         stream.play().map_err(map_cpal_error)?;
@@ -168,11 +187,15 @@ pub struct CpalInputWatcher {
 
 impl CpalInputWatcher {
     pub fn new() -> Self {
-        Self { last: Self::current() }
+        Self {
+            last: Self::current(),
+        }
     }
 
     fn current() -> Option<cpal::DeviceId> {
-        cpal::default_host().default_input_device().and_then(|d| d.id().ok())
+        cpal::default_host()
+            .default_input_device()
+            .and_then(|d| d.id().ok())
     }
 }
 
@@ -197,8 +220,8 @@ impl DeviceWatcher for CpalInputWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FakeFactory {
         opens: Arc<AtomicUsize>,
@@ -227,15 +250,26 @@ mod tests {
 
     impl DeviceWatcher for FakeWatcher {
         fn default_input_changed(&mut self) -> bool {
-            if self.answers.is_empty() { false } else { self.answers.remove(0) }
+            if self.answers.is_empty() {
+                false
+            } else {
+                self.answers.remove(0)
+            }
         }
     }
 
     fn source(answers: Vec<bool>) -> (MicSource, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         let opens = Arc::new(AtomicUsize::new(0));
         let live = Arc::new(AtomicUsize::new(0));
-        let factory = FakeFactory { opens: opens.clone(), live: live.clone() };
-        let src = MicSource::with_parts(Box::new(factory), Box::new(FakeWatcher { answers }), Duration::from_millis(5));
+        let factory = FakeFactory {
+            opens: opens.clone(),
+            live: live.clone(),
+        };
+        let src = MicSource::with_parts(
+            Box::new(factory),
+            Box::new(FakeWatcher { answers }),
+            Duration::from_millis(5),
+        );
         (src, opens, live)
     }
 
@@ -269,8 +303,15 @@ mod tests {
                 Err(MorselError::MicPermissionDenied)
             }
         }
-        let mut src = MicSource::with_parts(Box::new(Denied), Box::new(FakeWatcher { answers: vec![] }), Duration::from_millis(5));
+        let mut src = MicSource::with_parts(
+            Box::new(Denied),
+            Box::new(FakeWatcher { answers: vec![] }),
+            Duration::from_millis(5),
+        );
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
-        assert!(matches!(src.start(tx), Err(MorselError::MicPermissionDenied)));
+        assert!(matches!(
+            src.start(tx),
+            Err(MorselError::MicPermissionDenied)
+        ));
     }
 }

@@ -20,7 +20,11 @@ pub trait Transcriber: Send + Sync {
 }
 
 /// Tries 3 times, with waits of 2 s and 4 s. Returns `None` when all tries fail.
-pub async fn transcribe_with_retry(t: &dyn Transcriber, samples: &[f32], language: Option<&str>) -> Option<String> {
+pub async fn transcribe_with_retry(
+    t: &dyn Transcriber,
+    samples: &[f32],
+    language: Option<&str>,
+) -> Option<String> {
     for attempt in 0..=RETRY_WAITS.len() {
         match t.transcribe(samples, language).await {
             Ok(text) => return Some(text),
@@ -77,13 +81,20 @@ mod tests {
     impl Transcriber for Flaky {
         async fn transcribe(&self, _samples: &[f32], _language: Option<&str>) -> Result<String> {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
-            if n < self.fail_first { Err(MorselError::Http("down".into())) } else { Ok("hello".into()) }
+            if n < self.fail_first {
+                Err(MorselError::Http("down".into()))
+            } else {
+                Ok("hello".into())
+            }
         }
     }
 
     #[tokio::test(start_paused = true)]
     async fn retries_twice_then_returns_none() {
-        let t = Flaky { calls: AtomicUsize::new(0), fail_first: 10 };
+        let t = Flaky {
+            calls: AtomicUsize::new(0),
+            fail_first: 10,
+        };
         let started = tokio::time::Instant::now();
         assert_eq!(transcribe_with_retry(&t, &[0.1; 10], None).await, None);
         assert_eq!(t.calls.load(Ordering::SeqCst), 3);
@@ -92,8 +103,14 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn second_try_success_returns_text() {
-        let t = Flaky { calls: AtomicUsize::new(0), fail_first: 1 };
-        assert_eq!(transcribe_with_retry(&t, &[0.1; 10], None).await.as_deref(), Some("hello"));
+        let t = Flaky {
+            calls: AtomicUsize::new(0),
+            fail_first: 1,
+        };
+        assert_eq!(
+            transcribe_with_retry(&t, &[0.1; 10], None).await.as_deref(),
+            Some("hello")
+        );
         assert_eq!(t.calls.load(Ordering::SeqCst), 2);
     }
 
@@ -103,7 +120,10 @@ mod tests {
         assert_eq!(&wav[0..4], b"RIFF");
         assert_eq!(&wav[8..12], b"WAVE");
         assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), 1);
-        assert_eq!(u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]), 16_000);
+        assert_eq!(
+            u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]),
+            16_000
+        );
         assert_eq!(u16::from_le_bytes([wav[34], wav[35]]), 16);
         assert_eq!(wav.len(), 44 + 4 * 2);
         assert_eq!(i16::from_le_bytes([wav[46], wav[47]]), 16_383);

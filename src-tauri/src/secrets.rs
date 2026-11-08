@@ -63,7 +63,10 @@ impl SecretStore for MemoryStore {
     }
 
     fn set(&self, account: &str, value: &str) -> Result<()> {
-        self.values.lock().expect("lock").insert(account.to_owned(), value.to_owned());
+        self.values
+            .lock()
+            .expect("lock")
+            .insert(account.to_owned(), value.to_owned());
         Ok(())
     }
 

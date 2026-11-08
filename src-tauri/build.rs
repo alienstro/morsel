@@ -12,6 +12,8 @@ const COMMANDS: &[&str] = &[
     "save_settings",
     "set_api_key",
     "has_api_key",
+    "write_notes",
+    "cancel_notes",
     "test_notes_key",
     "model_status",
     "download_model",
@@ -19,7 +21,8 @@ const COMMANDS: &[&str] = &[
 
 fn main() {
     tauri_build::try_build(
-        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
     )
     .expect("failed to run the Tauri build script");
 }

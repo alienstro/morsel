@@ -21,7 +21,9 @@ mod tests {
 
     #[test]
     fn rms_of_full_scale_sine_is_about_0_707() {
-        let s: Vec<f32> = (0..1600).map(|i| (i as f32 * std::f32::consts::TAU / 160.0).sin()).collect();
+        let s: Vec<f32> = (0..1600)
+            .map(|i| (i as f32 * std::f32::consts::TAU / 160.0).sin())
+            .collect();
         assert!((rms(&s) - 0.707).abs() < 0.01);
     }
 

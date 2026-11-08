@@ -21,6 +21,8 @@
     "allow-has-api-key",
     "allow-test-notes-key",
     "allow-model-status",
-    "allow-download-model"
+    "allow-download-model",
+    "allow-write-notes",
+    "allow-cancel-notes"
   ]
 }

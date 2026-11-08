@@ -6,7 +6,9 @@ use crate::db::SharedDb;
 use crate::db::meetings::{add_line, create_meeting, mark_open_meetings_interrupted, set_status};
 use crate::events::{EventSink, LEVELS, STATUS, TRANSCRIPT};
 use crate::transcribe::{Transcriber, transcribe_with_retry};
-use crate::types::{AudioChunk, MeetingId, MeetingStatus, MorselError, Result, Speaker, TranscriptLine};
+use crate::types::{
+    AudioChunk, MeetingId, MeetingStatus, MorselError, Result, Speaker, TranscriptLine,
+};
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -75,15 +77,36 @@ impl MeetingSession {
             Ok(()) => (Some(system), Some(sys_rx), None),
             Err(err) => (None, None, Some(format!("Others are not recorded: {err}"))),
         };
-        sink.emit(STATUS, json!({ "meetingId": id, "status": MeetingStatus::Recording, "warning": warning }));
+        sink.emit(
+            STATUS,
+            json!({ "meetingId": id, "status": MeetingStatus::Recording, "warning": warning }),
+        );
 
-        let shared = Shared { id, db, transcriber, sink: sink.clone(), language };
+        let shared = Shared {
+            id,
+            db,
+            transcriber,
+            sink: sink.clone(),
+            language,
+        };
         let paused = Arc::new(AtomicBool::new(false));
         let you_level = Arc::new(AtomicU32::new(0));
         let others_level = Arc::new(AtomicU32::new(0));
-        let mut pumps = vec![tokio::spawn(pump(shared.clone(), Speaker::You, mic_rx, paused.clone(), you_level.clone()))];
+        let mut pumps = vec![tokio::spawn(pump(
+            shared.clone(),
+            Speaker::You,
+            mic_rx,
+            paused.clone(),
+            you_level.clone(),
+        ))];
         if let Some(rx) = sys_rx {
-            pumps.push(tokio::spawn(pump(shared.clone(), Speaker::Others, rx, paused.clone(), others_level.clone())));
+            pumps.push(tokio::spawn(pump(
+                shared.clone(),
+                Speaker::Others,
+                rx,
+                paused.clone(),
+                others_level.clone(),
+            )));
         }
         let levels = tokio::spawn(async move {
             let mut tick = tokio::time::interval(LEVEL_INTERVAL);
@@ -94,7 +117,17 @@ impl MeetingSession {
                 sink.emit(LEVELS, json!({ "you": you, "others": others }));
             }
         });
-        Ok((Self { shared, mic, system, paused, pumps, levels }, id))
+        Ok((
+            Self {
+                shared,
+                mic,
+                system,
+                paused,
+                pumps,
+                levels,
+            },
+            id,
+        ))
     }
 
     pub fn id(&self) -> MeetingId {
@@ -118,21 +151,35 @@ impl MeetingSession {
             system.stop();
         }
         for pump in self.pumps.drain(..) {
-            pump.await.map_err(|e| MorselError::Audio(format!("audio task failed: {e}")))?;
+            pump.await
+                .map_err(|e| MorselError::Audio(format!("audio task failed: {e}")))?;
         }
         self.levels.abort();
         self.set_status(MeetingStatus::Stopped)
     }
 
     fn set_status(&self, status: MeetingStatus) -> Result<()> {
-        set_status(&self.shared.db.lock().expect("db lock"), self.shared.id, status)?;
-        self.shared.sink.emit(STATUS, json!({ "meetingId": self.shared.id, "status": status, "warning": null }));
+        set_status(
+            &self.shared.db.lock().expect("db lock"),
+            self.shared.id,
+            status,
+        )?;
+        self.shared.sink.emit(
+            STATUS,
+            json!({ "meetingId": self.shared.id, "status": status, "warning": null }),
+        );
         Ok(())
     }
 }
 
 /// Reads one stream until its source stops. Each complete chunk becomes a transcription job.
-async fn pump(shared: Shared, speaker: Speaker, mut rx: Receiver<Vec<f32>>, paused: Arc<AtomicBool>, level: Arc<AtomicU32>) {
+async fn pump(
+    shared: Shared,
+    speaker: Speaker,
+    mut rx: Receiver<Vec<f32>>,
+    paused: Arc<AtomicBool>,
+    level: Arc<AtomicU32>,
+) {
     let mut chunker = Chunker::new(speaker);
     let mut jobs = JoinSet::new();
     while let Some(frame) = rx.recv().await {
@@ -153,17 +200,31 @@ async fn pump(shared: Shared, speaker: Speaker, mut rx: Receiver<Vec<f32>>, paus
 
 async fn transcribe_chunk(shared: Shared, chunk: AudioChunk) {
     let end_ms = chunk.start_ms + (chunk.samples.len() as u64 * 1000 / PIPELINE_RATE as u64);
-    let text = match transcribe_with_retry(shared.transcriber.as_ref(), &chunk.samples, shared.language.as_deref()).await {
+    let text = match transcribe_with_retry(
+        shared.transcriber.as_ref(),
+        &chunk.samples,
+        shared.language.as_deref(),
+    )
+    .await
+    {
         Some(text) if text.trim().is_empty() => return,
         Some(text) => text,
         None => format!("[missing {}–{}]", clock(chunk.start_ms), clock(end_ms)),
     };
-    let line = TranscriptLine { meeting_id: shared.id, speaker: chunk.speaker, start_ms: chunk.start_ms, end_ms, text };
+    let line = TranscriptLine {
+        meeting_id: shared.id,
+        speaker: chunk.speaker,
+        start_ms: chunk.start_ms,
+        end_ms,
+        text,
+    };
     if let Err(err) = add_line(&shared.db.lock().expect("db lock"), &line) {
         eprintln!("cannot save a transcript line: {err}");
         return;
     }
-    shared.sink.emit(TRANSCRIPT, serde_json::to_value(&line).unwrap_or_default());
+    shared
+        .sink
+        .emit(TRANSCRIPT, serde_json::to_value(&line).unwrap_or_default());
 }
 
 #[cfg(test)]
@@ -198,11 +259,20 @@ mod tests {
 
     fn source() -> (Box<dyn AudioSource>, Slot) {
         let slot: Slot = Arc::new(Mutex::new(None));
-        (Box::new(FakeSource { slot: slot.clone(), fail: None }), slot)
+        (
+            Box::new(FakeSource {
+                slot: slot.clone(),
+                fail: None,
+            }),
+            slot,
+        )
     }
 
     fn failing(make: fn() -> MorselError) -> Box<dyn AudioSource> {
-        Box::new(FakeSource { slot: Arc::new(Mutex::new(None)), fail: Some(make) })
+        Box::new(FakeSource {
+            slot: Arc::new(Mutex::new(None)),
+            fail: Some(make),
+        })
     }
 
     async fn send(slot: &Slot, samples: Vec<f32>) {
@@ -213,7 +283,9 @@ mod tests {
     }
 
     fn speech(seconds: f32) -> Vec<f32> {
-        (0..(seconds * 16_000.0) as usize).map(|i| (i as f32 * 0.07).sin() * 0.3).collect()
+        (0..(seconds * 16_000.0) as usize)
+            .map(|i| (i as f32 * 0.07).sin() * 0.3)
+            .collect()
     }
 
     struct FakeTranscriber {
@@ -225,7 +297,11 @@ mod tests {
     impl Transcriber for FakeTranscriber {
         async fn transcribe(&self, samples: &[f32], _l: Option<&str>) -> Result<String> {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
-            if self.fail { Err(MorselError::Http("down".into())) } else { Ok(format!("{} samples", samples.len())) }
+            if self.fail {
+                Err(MorselError::Http("down".into()))
+            } else {
+                Ok(format!("{} samples", samples.len()))
+            }
         }
     }
 
@@ -236,11 +312,29 @@ mod tests {
     }
 
     fn deps(fail: bool, delay_ms: u64) -> (Arc<dyn Transcriber>, Arc<VecSink>) {
-        (Arc::new(FakeTranscriber { fail, delay_ms }), Arc::new(VecSink::default()))
+        (
+            Arc::new(FakeTranscriber { fail, delay_ms }),
+            Arc::new(VecSink::default()),
+        )
     }
 
-    fn start(db: &SharedDb, mic: Box<dyn AudioSource>, sys: Box<dyn AudioSource>, t: Arc<dyn Transcriber>, sink: Arc<VecSink>) -> Result<(MeetingSession, MeetingId)> {
-        MeetingSession::start(db.clone(), mic, sys, t, sink, "Weekly product sync", 5, None)
+    fn start(
+        db: &SharedDb,
+        mic: Box<dyn AudioSource>,
+        sys: Box<dyn AudioSource>,
+        t: Arc<dyn Transcriber>,
+        sink: Arc<VecSink>,
+    ) -> Result<(MeetingSession, MeetingId)> {
+        MeetingSession::start(
+            db.clone(),
+            mic,
+            sys,
+            t,
+            sink,
+            "Weekly product sync",
+            5,
+            None,
+        )
     }
 
     #[tokio::test]
@@ -277,7 +371,11 @@ mod tests {
         let lines = get_meeting(&db.lock().unwrap(), id).unwrap().lines;
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start_ms, 0);
-        assert!((9_900..=10_100).contains(&lines[0].end_ms), "end {}", lines[0].end_ms);
+        assert!(
+            (9_900..=10_100).contains(&lines[0].end_ms),
+            "end {}",
+            lines[0].end_ms
+        );
     }
 
     #[tokio::test]
@@ -308,7 +406,14 @@ mod tests {
         let (_d, db) = db();
         let (t, sink) = deps(false, 0);
         let (mic, mic_slot) = source();
-        let (session, id) = start(&db, mic, failing(|| MorselError::SystemAudioPermissionDenied), t, sink.clone()).unwrap();
+        let (session, id) = start(
+            &db,
+            mic,
+            failing(|| MorselError::SystemAudioPermissionDenied),
+            t,
+            sink.clone(),
+        )
+        .unwrap();
         let status = &sink.named(STATUS)[0];
         assert_eq!(status["meetingId"], id);
         assert!(status["warning"].as_str().unwrap().contains("Others"));
@@ -322,9 +427,19 @@ mod tests {
         let (_d, db) = db();
         let (t, sink) = deps(false, 0);
         let (sys, _s) = source();
-        let result = start(&db, failing(|| MorselError::MicPermissionDenied), sys, t, sink);
+        let result = start(
+            &db,
+            failing(|| MorselError::MicPermissionDenied),
+            sys,
+            t,
+            sink,
+        );
         assert!(matches!(result, Err(MorselError::MicPermissionDenied)));
-        let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM meetings", [], |r| r.get(0)).unwrap();
+        let n: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM meetings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -333,7 +448,10 @@ mod tests {
         let (_d, db) = db();
         let id = crate::db::meetings::create_meeting(&db.lock().unwrap(), "x", 1).unwrap();
         assert_eq!(recover(&db).unwrap(), 1);
-        assert_eq!(get_meeting(&db.lock().unwrap(), id).unwrap().summary.status, MeetingStatus::Interrupted);
+        assert_eq!(
+            get_meeting(&db.lock().unwrap(), id).unwrap().summary.status,
+            MeetingStatus::Interrupted
+        );
     }
 
     #[test]

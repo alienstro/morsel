@@ -22,11 +22,17 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
 
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -62,7 +68,11 @@ struct Usage {
 
 /// Joins the base URL and a path, with one slash between them.
 pub fn endpoint(base_url: &str, path: &str) -> String {
-    format!("{}/{}", base_url.trim_end_matches('/'), path.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 /// Maps an HTTP error status to a Morsel error.
@@ -70,7 +80,10 @@ pub fn status_error(status: reqwest::StatusCode, body: &str) -> MorselError {
     match status.as_u16() {
         401 | 403 => MorselError::InvalidKey,
         429 => MorselError::RateLimit,
-        code => MorselError::Http(format!("HTTP {code}: {}", body.chars().take(300).collect::<String>())),
+        code => MorselError::Http(format!(
+            "HTTP {code}: {}",
+            body.chars().take(300).collect::<String>()
+        )),
     }
 }
 
@@ -78,7 +91,11 @@ fn send_error(err: reqwest::Error) -> MorselError {
     MorselError::Http(err.without_url().to_string())
 }
 
-pub async fn chat(http: &reqwest::Client, cfg: &LlmConfig, messages: &[ChatMessage]) -> Result<ChatResult> {
+pub async fn chat(
+    http: &reqwest::Client,
+    cfg: &LlmConfig,
+    messages: &[ChatMessage],
+) -> Result<ChatResult> {
     let response = http
         .post(endpoint(&cfg.base_url, "chat/completions"))
         .bearer_auth(&cfg.api_key)
@@ -101,7 +118,12 @@ pub async fn chat(http: &reqwest::Client, cfg: &LlmConfig, messages: &[ChatMessa
         .map(|c| c.message.content)
         .ok_or_else(|| MorselError::Http("the response has no choices".into()))?;
     let usage = parsed.usage.unwrap_or_default();
-    Ok(ChatResult { text, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost: usage.cost })
+    Ok(ChatResult {
+        text,
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cost: usage.cost,
+    })
 }
 
 /// Checks the base URL and the key with `GET /models`.
@@ -129,7 +151,11 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn cfg(server: &MockServer, suffix: &str) -> LlmConfig {
-        LlmConfig { base_url: format!("{}/v1{suffix}", server.uri()), model: "test/model".into(), api_key: "sk-test".into() }
+        LlmConfig {
+            base_url: format!("{}/v1{suffix}", server.uri()),
+            model: "test/model".into(),
+            api_key: "sk-test".into(),
+        }
     }
 
     fn user(text: &str) -> Vec<ChatMessage> {
@@ -150,12 +176,16 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .and(header("authorization", "Bearer sk-test"))
-            .and(body_partial_json(json!({ "model": "test/model", "messages": [{ "role": "user", "content": "hi" }] })))
+            .and(body_partial_json(
+                json!({ "model": "test/model", "messages": [{ "role": "user", "content": "hi" }] }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(ok_body(None)))
             .expect(1)
             .mount(&server)
             .await;
-        let result = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi")).await.unwrap();
+        let result = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi"))
+            .await
+            .unwrap();
         assert_eq!(result.text, "hello");
     }
 
@@ -166,23 +196,38 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(ok_body(Some(0.0021))))
             .mount(&server)
             .await;
-        let r = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi")).await.unwrap();
-        assert_eq!((r.prompt_tokens, r.completion_tokens, r.cost), (12, 3, Some(0.0021)));
+        let r = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi"))
+            .await
+            .unwrap();
+        assert_eq!(
+            (r.prompt_tokens, r.completion_tokens, r.cost),
+            (12, 3, Some(0.0021))
+        );
     }
 
     #[tokio::test]
     async fn http_401_maps_to_invalid_key_error() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
-        let err = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi")).await.unwrap_err();
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let err = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi"))
+            .await
+            .unwrap_err();
         assert!(matches!(err, MorselError::InvalidKey), "{err:?}");
     }
 
     #[tokio::test]
     async fn http_429_maps_to_rate_limit_error() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(429)).mount(&server).await;
-        let err = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi")).await.unwrap_err();
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&server)
+            .await;
+        let err = chat(&reqwest::Client::new(), &cfg(&server, ""), &user("hi"))
+            .await
+            .unwrap_err();
         assert!(matches!(err, MorselError::RateLimit), "{err:?}");
     }
 
@@ -195,7 +240,9 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        chat(&reqwest::Client::new(), &cfg(&server, "/"), &user("hi")).await.unwrap();
+        chat(&reqwest::Client::new(), &cfg(&server, "/"), &user("hi"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -208,6 +255,8 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        test_key(&reqwest::Client::new(), &cfg(&server, "")).await.unwrap();
+        test_key(&reqwest::Client::new(), &cfg(&server, ""))
+            .await
+            .unwrap();
     }
 }

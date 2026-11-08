@@ -5,6 +5,7 @@ use crate::db::SharedDb;
 use crate::db::meetings::{self, MeetingDetail, MeetingSummary, Template};
 use crate::events::{EventSink, MODEL_DOWNLOAD};
 use crate::llm::{self, LlmConfig};
+use crate::notes::writer::{CancellationToken, NotesContext};
 use crate::secrets::{NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
 use crate::session::MeetingSession;
 use crate::settings::{self, Settings, TranscribeMode};
@@ -14,11 +15,12 @@ use crate::transcribe::model_download::{ensure_model, model_ready};
 use crate::transcribe::parakeet::ParakeetTranscriber;
 use crate::types::{MeetingId, MorselError, Result};
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
-pub const UNTITLED: &str = "Untitled meeting";
+pub use crate::db::meetings::UNTITLED;
 
 /// Makes the audio sources and the transcriber. Tests use fakes.
 pub trait Engines: Send + Sync {
@@ -37,7 +39,12 @@ pub struct RealEngines {
 
 impl RealEngines {
     pub fn new(model_dir: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
-        Self { model_dir, http, secrets, parakeet: Mutex::new(None) }
+        Self {
+            model_dir,
+            http,
+            secrets,
+            parakeet: Mutex::new(None),
+        }
     }
 }
 
@@ -56,17 +63,18 @@ impl Engines for RealEngines {
                 let mut cached = self.parakeet.lock().expect("parakeet lock");
                 if cached.is_none() {
                     if !model_ready(&self.model_dir) {
-                        return Err(MorselError::Invalid("download the transcription model in Settings first".into()));
+                        return Err(MorselError::Invalid(
+                            "download the transcription model in Settings first".into(),
+                        ));
                     }
                     *cached = Some(Arc::new(ParakeetTranscriber::new(&self.model_dir)?));
                 }
                 Ok(cached.clone().expect("loaded") as Arc<dyn Transcriber>)
             }
             TranscribeMode::Cloud => {
-                let key = self
-                    .secrets
-                    .get(TRANSCRIBE_KEY)?
-                    .ok_or_else(|| MorselError::Invalid("add the cloud transcription key in Settings first".into()))?;
+                let key = self.secrets.get(TRANSCRIBE_KEY)?.ok_or_else(|| {
+                    MorselError::Invalid("add the cloud transcription key in Settings first".into())
+                })?;
                 Ok(Arc::new(CloudTranscriber::new(
                     self.http.clone(),
                     settings.transcribe_base_url.clone(),
@@ -86,6 +94,7 @@ pub struct AppState {
     engines: Arc<dyn Engines>,
     model_dir: PathBuf,
     session: tokio::sync::Mutex<Option<MeetingSession>>,
+    notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
 }
 
 impl AppState {
@@ -97,7 +106,16 @@ impl AppState {
         engines: Arc<dyn Engines>,
         model_dir: PathBuf,
     ) -> Self {
-        Self { db, secrets, http, sink, engines, model_dir, session: tokio::sync::Mutex::new(None) }
+        Self {
+            db,
+            secrets,
+            http,
+            sink,
+            engines,
+            model_dir,
+            session: tokio::sync::Mutex::new(None),
+            notes_jobs: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
@@ -108,14 +126,21 @@ impl AppState {
         settings::load_settings(&self.conn())
     }
 
-    pub async fn start_meeting(&self, title: Option<String>, template_id: i64) -> Result<MeetingId> {
+    pub async fn start_meeting(
+        &self,
+        title: Option<String>,
+        template_id: i64,
+    ) -> Result<MeetingId> {
         let mut slot = self.session.lock().await;
         if slot.is_some() {
             return Err(MorselError::AlreadyRecording);
         }
         let settings = self.settings()?;
         let transcriber = self.engines.transcriber(&settings)?;
-        let title = title.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty()).unwrap_or_else(|| UNTITLED.into());
+        let title = title
+            .map(|t| t.trim().to_owned())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| UNTITLED.into());
         let (session, id) = MeetingSession::start(
             self.db.clone(),
             self.engines.mic(),
@@ -131,15 +156,30 @@ impl AppState {
     }
 
     pub async fn pause_meeting(&self) -> Result<()> {
-        self.session.lock().await.as_ref().ok_or(MorselError::NotRecording)?.pause()
+        self.session
+            .lock()
+            .await
+            .as_ref()
+            .ok_or(MorselError::NotRecording)?
+            .pause()
     }
 
     pub async fn resume_meeting(&self) -> Result<()> {
-        self.session.lock().await.as_ref().ok_or(MorselError::NotRecording)?.resume()
+        self.session
+            .lock()
+            .await
+            .as_ref()
+            .ok_or(MorselError::NotRecording)?
+            .resume()
     }
 
     pub async fn stop_meeting(&self) -> Result<()> {
-        let session = self.session.lock().await.take().ok_or(MorselError::NotRecording)?;
+        let session = self
+            .session
+            .lock()
+            .await
+            .take()
+            .ok_or(MorselError::NotRecording)?;
         session.stop().await
     }
 
@@ -166,26 +206,89 @@ impl AppState {
     /// An empty key deletes the saved key.
     pub fn set_api_key(&self, account: &str, key: &str) -> Result<()> {
         if !is_known_account(account) {
-            return Err(MorselError::Invalid(format!("unknown key account {account}")));
+            return Err(MorselError::Invalid(format!(
+                "unknown key account {account}"
+            )));
         }
-        if key.trim().is_empty() { self.secrets.delete(account) } else { self.secrets.set(account, key.trim()) }
+        if key.trim().is_empty() {
+            self.secrets.delete(account)
+        } else {
+            self.secrets.set(account, key.trim())
+        }
     }
 
     /// Tells only if a key is saved. The key itself never leaves the backend.
     pub fn has_api_key(&self, account: &str) -> Result<bool> {
         if !is_known_account(account) {
-            return Err(MorselError::Invalid(format!("unknown key account {account}")));
+            return Err(MorselError::Invalid(format!(
+                "unknown key account {account}"
+            )));
         }
         Ok(self.secrets.get(account)?.is_some())
     }
 
     pub fn notes_config(&self, model: &str) -> Result<LlmConfig> {
         let settings = self.settings()?;
-        let api_key = self
-            .secrets
-            .get(NOTES_KEY)?
-            .ok_or_else(|| MorselError::Invalid("add the notes API key in Settings first".into()))?;
-        Ok(LlmConfig { base_url: settings.notes_base_url, model: model.to_owned(), api_key })
+        let api_key = self.secrets.get(NOTES_KEY)?.ok_or_else(|| {
+            MorselError::Invalid("add the notes API key in Settings first".into())
+        })?;
+        Ok(LlmConfig {
+            base_url: settings.notes_base_url,
+            model: model.to_owned(),
+            api_key,
+        })
+    }
+
+    /// Starts writing the note in the background. The result comes as a `notes://done` or `notes://failed` event.
+    pub fn write_notes(&self, meeting_id: MeetingId, template_id: i64) -> Result<()> {
+        let settings = self.settings()?;
+        let notes = self.notes_config(&settings.notes_model)?;
+        if notes.model.trim().is_empty() {
+            return Err(MorselError::Invalid(
+                "choose a notes model in Settings first".into(),
+            ));
+        }
+        let quick_model = if settings.quick_model.trim().is_empty() {
+            &settings.notes_model
+        } else {
+            &settings.quick_model
+        };
+        let quick = LlmConfig {
+            model: quick_model.clone(),
+            ..notes.clone()
+        };
+        let ctx = NotesContext {
+            db: self.db.clone(),
+            http: self.http.clone(),
+            sink: self.sink.clone(),
+            notes,
+            quick,
+        };
+        let cancel = CancellationToken::new();
+        let jobs = self.notes_jobs.clone();
+        if let Some(old) = jobs
+            .lock()
+            .expect("jobs lock")
+            .insert(meeting_id, cancel.clone())
+        {
+            old.cancel();
+        }
+        tokio::spawn(async move {
+            let _ = crate::notes::writer::write_notes(&ctx, meeting_id, template_id, cancel).await;
+            jobs.lock().expect("jobs lock").remove(&meeting_id);
+        });
+        Ok(())
+    }
+
+    /// Cancels the note of a meeting. Returns false when no note is being written.
+    pub fn cancel_notes(&self, meeting_id: MeetingId) -> bool {
+        match self.notes_jobs.lock().expect("jobs lock").get(&meeting_id) {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
     }
 
     pub async fn test_notes_key(&self) -> Result<()> {
@@ -200,7 +303,10 @@ impl AppState {
     pub async fn download_model(&self) -> Result<()> {
         let sink = self.sink.clone();
         ensure_model(&self.http, &self.model_dir, move |received, total| {
-            sink.emit(MODEL_DOWNLOAD, json!({ "received": received, "total": total }));
+            sink.emit(
+                MODEL_DOWNLOAD,
+                json!({ "received": received, "total": total }),
+            );
         })
         .await
         .map(|_| ())
@@ -208,7 +314,11 @@ impl AppState {
 }
 
 #[tauri::command]
-pub async fn start_meeting(state: State<'_, AppState>, title: Option<String>, template_id: i64) -> Result<MeetingId> {
+pub async fn start_meeting(
+    state: State<'_, AppState>,
+    title: Option<String>,
+    template_id: i64,
+) -> Result<MeetingId> {
     state.start_meeting(title, template_id).await
 }
 
@@ -228,12 +338,19 @@ pub async fn stop_meeting(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
-pub async fn save_user_notes(state: State<'_, AppState>, meeting_id: MeetingId, body: String) -> Result<()> {
+pub async fn save_user_notes(
+    state: State<'_, AppState>,
+    meeting_id: MeetingId,
+    body: String,
+) -> Result<()> {
     state.save_user_notes(meeting_id, &body)
 }
 
 #[tauri::command]
-pub async fn get_meeting(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<MeetingDetail> {
+pub async fn get_meeting(
+    state: State<'_, AppState>,
+    meeting_id: MeetingId,
+) -> Result<MeetingDetail> {
     state.get_meeting(meeting_id)
 }
 
@@ -265,6 +382,20 @@ pub async fn set_api_key(state: State<'_, AppState>, account: String, key: Strin
 #[tauri::command]
 pub async fn has_api_key(state: State<'_, AppState>, account: String) -> Result<bool> {
     state.has_api_key(&account)
+}
+
+#[tauri::command]
+pub async fn write_notes(
+    state: State<'_, AppState>,
+    meeting_id: MeetingId,
+    template_id: i64,
+) -> Result<()> {
+    state.write_notes(meeting_id, template_id)
+}
+
+#[tauri::command]
+pub async fn cancel_notes(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<bool> {
+    Ok(state.cancel_notes(meeting_id))
 }
 
 #[tauri::command]
@@ -337,7 +468,10 @@ mod tests {
     #[test]
     fn set_api_key_rejects_unknown_account() {
         let (_d, s) = state();
-        assert!(matches!(s.set_api_key("other", "x"), Err(MorselError::Invalid(_))));
+        assert!(matches!(
+            s.set_api_key("other", "x"),
+            Err(MorselError::Invalid(_))
+        ));
         s.set_api_key(NOTES_KEY, "sk-1").unwrap();
         assert!(s.has_api_key(NOTES_KEY).unwrap());
     }
@@ -356,15 +490,33 @@ mod tests {
     async fn start_meeting_twice_returns_already_recording_error() {
         let (_d, s) = state();
         let id = s.start_meeting(None, 1).await.unwrap();
-        assert!(matches!(s.start_meeting(None, 1).await, Err(MorselError::AlreadyRecording)));
+        assert!(matches!(
+            s.start_meeting(None, 1).await,
+            Err(MorselError::AlreadyRecording)
+        ));
         assert_eq!(s.get_meeting(id).unwrap().summary.title, "Untitled meeting");
         s.stop_meeting().await.unwrap();
-        assert!(matches!(s.stop_meeting().await, Err(MorselError::NotRecording)));
+        assert!(matches!(
+            s.stop_meeting().await,
+            Err(MorselError::NotRecording)
+        ));
+    }
+
+    #[tokio::test]
+    async fn write_notes_needs_a_notes_key() {
+        let (_d, s) = state();
+        let id = s.start_meeting(Some("Sync".into()), 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(matches!(s.write_notes(id, 1), Err(MorselError::Invalid(_))));
+        assert!(!s.cancel_notes(id));
     }
 
     #[tokio::test]
     async fn pause_without_meeting_returns_not_recording() {
         let (_d, s) = state();
-        assert!(matches!(s.pause_meeting().await, Err(MorselError::NotRecording)));
+        assert!(matches!(
+            s.pause_meeting().await,
+            Err(MorselError::NotRecording)
+        ));
     }
 }

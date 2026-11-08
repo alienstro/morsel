@@ -11,13 +11,15 @@ use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_core_audio::{
-    AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop,
-    AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
-    CATapDescription, CATapMuteBehavior, kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceIsStackedKey,
-    kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey, kAudioAggregateDeviceSubDeviceListKey,
-    kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey,
-    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyDefaultSystemOutputDevice, kAudioObjectPropertyElementMain,
+    AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID, AudioDeviceStart,
+    AudioDeviceStop, AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
+    AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
+    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress, CATapDescription,
+    CATapMuteBehavior, kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceIsStackedKey,
+    kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey,
+    kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
+    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
+    kAudioHardwarePropertyDefaultSystemOutputDevice, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioSubDeviceUIDKey,
     kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
 };
@@ -79,7 +81,13 @@ impl Default for SystemTapSource {
 }
 
 fn check(status: i32, what: &str) -> Result<()> {
-    if status == 0 { Ok(()) } else { Err(MorselError::Audio(format!("{what} failed (OSStatus {status})"))) }
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(MorselError::Audio(format!(
+            "{what} failed (OSStatus {status})"
+        )))
+    }
 }
 
 fn get_property<T: Copy>(object: AudioObjectID, selector: u32) -> Result<T> {
@@ -105,7 +113,10 @@ fn get_property<T: Copy>(object: AudioObjectID, selector: u32) -> Result<T> {
 }
 
 fn default_output_uid() -> Result<String> {
-    let device: AudioObjectID = get_property(kAudioObjectSystemObject as AudioObjectID, kAudioHardwarePropertyDefaultSystemOutputDevice)?;
+    let device: AudioObjectID = get_property(
+        kAudioObjectSystemObject as AudioObjectID,
+        kAudioHardwarePropertyDefaultSystemOutputDevice,
+    )?;
     let raw: *const CFString = get_property(device, kAudioDevicePropertyDeviceUID)?;
     let uid = NonNull::new(raw as *mut CFString)
         .map(|ptr| unsafe { CFRetained::from_raw(ptr) })
@@ -145,7 +156,9 @@ unsafe extern "C-unwind" fn io_proc(
     let planes: Vec<&[f32]> = buffers
         .iter()
         .filter(|b| !b.mData.is_null())
-        .map(|b| unsafe { std::slice::from_raw_parts(b.mData as *const f32, b.mDataByteSize as usize / 4) })
+        .map(|b| unsafe {
+            std::slice::from_raw_parts(b.mData as *const f32, b.mDataByteSize as usize / 4)
+        })
         .collect();
     let samples = match planes.len() {
         0 => return 0,
@@ -182,7 +195,10 @@ impl Running {
 impl SystemTapSource {
     fn start_inner(&mut self, tx: Sender<Vec<f32>>, run: &mut Running) -> Result<()> {
         let description = unsafe {
-            let d = CATapDescription::initStereoGlobalTapButExcludeProcesses(CATapDescription::alloc(), &NSArray::new());
+            let d = CATapDescription::initStereoGlobalTapButExcludeProcesses(
+                CATapDescription::alloc(),
+                &NSArray::new(),
+            );
             d.setPrivate(true);
             d.setMuteBehavior(CATapMuteBehavior::Unmuted);
             d.setName(&NSString::from_str("Morsel"));
@@ -198,7 +214,10 @@ impl SystemTapSource {
 
         let yes = NSNumber::new_bool(true);
         let no = NSNumber::new_bool(false);
-        let sub_tap = dictionary(&[(kAudioSubTapUIDKey, &tap_uid), (kAudioSubTapDriftCompensationKey, &yes)]);
+        let sub_tap = dictionary(&[
+            (kAudioSubTapUIDKey, &tap_uid),
+            (kAudioSubTapDriftCompensationKey, &yes),
+        ]);
         let sub_device = dictionary(&[(kAudioSubDeviceUIDKey, &output_uid)]);
         let taps = NSArray::from_retained_slice(&[sub_tap]);
         let devices = NSArray::from_retained_slice(&[sub_device]);
@@ -220,18 +239,29 @@ impl SystemTapSource {
             "creating the aggregate device",
         )?;
 
-        let resampler = Resampler::new(format.mSampleRate as u32, format.mChannelsPerFrame.max(1) as u16)?;
+        let resampler = Resampler::new(
+            format.mSampleRate as u32,
+            format.mChannelsPerFrame.max(1) as u16,
+        )?;
         let sink: SampleSink = Box::new(move |samples| {
             let _ = tx.try_send(samples);
         });
         run.state = Box::into_raw(Box::new(CallbackState { resampler, sink }));
         check(
             unsafe {
-                AudioDeviceCreateIOProcID(run.aggregate, Some(io_proc), run.state.cast(), NonNull::from(&mut run.proc_id))
+                AudioDeviceCreateIOProcID(
+                    run.aggregate,
+                    Some(io_proc),
+                    run.state.cast(),
+                    NonNull::from(&mut run.proc_id),
+                )
             },
             "creating the IO proc",
         )?;
-        check(unsafe { AudioDeviceStart(run.aggregate, run.proc_id) }, "starting system audio")?;
+        check(
+            unsafe { AudioDeviceStart(run.aggregate, run.proc_id) },
+            "starting system audio",
+        )?;
         Ok(())
     }
 }
@@ -245,7 +275,12 @@ impl AudioSource for SystemTapSource {
         if !tap_supported(major, minor) {
             return Err(MorselError::SystemAudioUnsupported);
         }
-        let mut run = Running { tap: 0, aggregate: 0, proc_id: None, state: std::ptr::null_mut() };
+        let mut run = Running {
+            tap: 0,
+            aggregate: 0,
+            proc_id: None,
+            state: std::ptr::null_mut(),
+        };
         match self.start_inner(tx, &mut run) {
             Ok(()) => {
                 self.running = Some(run);

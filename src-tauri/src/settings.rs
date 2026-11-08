@@ -42,11 +42,17 @@ impl Default for Settings {
 
 pub fn load_settings(conn: &Connection) -> Result<Settings> {
     let raw: Option<String> = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [ROW_KEY], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [ROW_KEY],
+            |r| r.get(0),
+        )
         .optional()?;
     match raw {
         None => Ok(Settings::default()),
-        Some(json) => serde_json::from_str(&json).map_err(|e| MorselError::Db(format!("settings: {e}"))),
+        Some(json) => {
+            serde_json::from_str(&json).map_err(|e| MorselError::Db(format!("settings: {e}")))
+        }
     }
 }
 
@@ -85,9 +91,11 @@ mod tests {
     fn settings_round_trip() {
         let (_d, conn) = temp_db();
         assert_eq!(load_settings(&conn).unwrap(), Settings::default());
-        let mut s = Settings::default();
-        s.notes_model = "some/model".into();
-        s.transcribe_mode = TranscribeMode::Cloud;
+        let s = Settings {
+            notes_model: "some/model".into(),
+            transcribe_mode: TranscribeMode::Cloud,
+            ..Settings::default()
+        };
         save_settings(&conn, &s).unwrap();
         assert_eq!(load_settings(&conn).unwrap(), s);
     }
@@ -99,7 +107,11 @@ mod tests {
         store.set("notes_api_key", "sk-secret-123").unwrap();
         save_settings(&conn, &Settings::default()).unwrap();
         let mut stmt = conn.prepare("SELECT value FROM settings").unwrap();
-        let values: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|v| v.unwrap()).collect();
+        let values: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|v| v.unwrap())
+            .collect();
         assert!(!values.is_empty());
         assert!(values.iter().all(|v| !v.contains("sk-secret-123")));
     }

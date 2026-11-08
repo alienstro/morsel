@@ -4,6 +4,7 @@ pub mod commands;
 pub mod db;
 pub mod events;
 pub mod llm;
+pub mod notes;
 pub mod secrets;
 pub mod session;
 pub mod settings;
@@ -42,6 +43,8 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         commands::save_settings,
         commands::set_api_key,
         commands::has_api_key,
+        commands::write_notes,
+        commands::cancel_notes,
         commands::test_notes_key,
         commands::model_status,
         commands::download_model,
@@ -60,7 +63,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     let http = reqwest::Client::new();
     let secrets: Arc<dyn SecretStore> = Arc::new(KeychainStore);
     let model_dir = transcribe::model_download::model_dir(&data_dir);
-    let engines = Arc::new(RealEngines::new(model_dir.clone(), http.clone(), secrets.clone()));
+    let engines = Arc::new(RealEngines::new(
+        model_dir.clone(),
+        http.clone(),
+        secrets.clone(),
+    ));
     let sink = Arc::new(TauriSink(app.handle().clone()));
     app.manage(AppState::new(db, secrets, http, sink, engines, model_dir));
     Ok(())
@@ -69,7 +76,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     configure(tauri::Builder::default())
-        .setup(|app| setup(app))
+        .setup(setup)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

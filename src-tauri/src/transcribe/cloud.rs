@@ -17,7 +17,12 @@ pub struct CloudTranscriber {
 
 impl CloudTranscriber {
     pub fn new(http: reqwest::Client, base_url: String, model: String, api_key: String) -> Self {
-        Self { http, base_url, model, api_key }
+        Self {
+            http,
+            base_url,
+            model,
+            api_key,
+        }
     }
 }
 
@@ -50,12 +55,15 @@ impl Transcriber for CloudTranscriber {
             .await
             .map_err(|e| MorselError::Http(e.without_url().to_string()))?;
         let status = response.status();
-        let body = response.text().await.map_err(|e| MorselError::Http(e.to_string()))?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| MorselError::Http(e.to_string()))?;
         if !status.is_success() {
             return Err(status_error(status, &body));
         }
-        let parsed: TranscriptionResponse =
-            serde_json::from_str(&body).map_err(|e| MorselError::Transcribe(format!("bad response: {e}")))?;
+        let parsed: TranscriptionResponse = serde_json::from_str(&body)
+            .map_err(|e| MorselError::Transcribe(format!("bad response: {e}")))?;
         Ok(parsed.text.trim().to_owned())
     }
 }
@@ -73,7 +81,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/openai/v1/audio/transcriptions"))
             .and(header("authorization", "Bearer gsk-test"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "text": " hello there " })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "text": " hello there " })),
+            )
             .mount(&server)
             .await;
         server
@@ -96,7 +106,10 @@ mod tests {
     #[tokio::test]
     async fn sends_multipart_with_file_and_model() {
         let server = server_ok().await;
-        let text = client(&server).transcribe(&[0.1; 1600], Some("en")).await.unwrap();
+        let text = client(&server)
+            .transcribe(&[0.1; 1600], Some("en"))
+            .await
+            .unwrap();
         assert_eq!(text, "hello there");
         let body = sent_body(&server).await;
         assert!(body.contains("name=\"file\"; filename=\"chunk.wav\""));
@@ -107,15 +120,24 @@ mod tests {
     #[tokio::test]
     async fn language_auto_is_not_sent() {
         let server = server_ok().await;
-        client(&server).transcribe(&[0.1; 1600], Some("auto")).await.unwrap();
+        client(&server)
+            .transcribe(&[0.1; 1600], Some("auto"))
+            .await
+            .unwrap();
         assert!(!sent_body(&server).await.contains("name=\"language\""));
     }
 
     #[tokio::test]
     async fn http_401_maps_to_invalid_key() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
-        let err = client(&server).transcribe(&[0.1; 1600], None).await.unwrap_err();
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let err = client(&server)
+            .transcribe(&[0.1; 1600], None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MorselError::InvalidKey));
     }
 }

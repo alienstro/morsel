@@ -24,7 +24,15 @@ pub struct Chunker {
 
 impl Chunker {
     pub fn new(speaker: Speaker) -> Self {
-        Self { speaker, partial: Vec::new(), buffer: Vec::new(), buffer_start: 0, total: 0, silent_run: 0, has_voice: false }
+        Self {
+            speaker,
+            partial: Vec::new(),
+            buffer: Vec::new(),
+            buffer_start: 0,
+            total: 0,
+            silent_run: 0,
+            has_voice: false,
+        }
     }
 
     /// Adds 16 kHz mono samples. Returns the chunks that are complete.
@@ -43,7 +51,8 @@ impl Chunker {
             self.buffer.extend_from_slice(frame);
             self.total += FRAME;
             let len = self.buffer.len();
-            if len >= MAX_SAMPLES || (len >= MIN_SAMPLES && self.silent_run >= CUT_SILENCE_SAMPLES) {
+            if len >= MAX_SAMPLES || (len >= MIN_SAMPLES && self.silent_run >= CUT_SILENCE_SAMPLES)
+            {
                 out.extend(self.cut());
             }
         }
@@ -70,7 +79,11 @@ impl Chunker {
         if samples.is_empty() || !has_voice {
             return None;
         }
-        Some(AudioChunk { speaker: self.speaker, start_ms: (start * 1000 / RATE) as u64, samples })
+        Some(AudioChunk {
+            speaker: self.speaker,
+            start_ms: (start * 1000 / RATE) as u64,
+            samples,
+        })
     }
 }
 
@@ -81,7 +94,9 @@ mod tests {
     const RATE: usize = 16_000;
 
     fn speech(seconds: f32) -> Vec<f32> {
-        (0..(seconds * RATE as f32) as usize).map(|i| (i as f32 * 0.07).sin() * 0.3).collect()
+        (0..(seconds * RATE as f32) as usize)
+            .map(|i| (i as f32 * 0.07).sin() * 0.3)
+            .collect()
     }
 
     fn silence(seconds: f32) -> Vec<f32> {
@@ -141,7 +156,10 @@ mod tests {
     #[test]
     fn start_ms_of_second_chunk_equals_length_of_first() {
         let mut c = Chunker::new(Speaker::You);
-        let chunks = push_all(&mut c, &[speech(12.0), silence(0.5), speech(12.0), silence(0.5)]);
+        let chunks = push_all(
+            &mut c,
+            &[speech(12.0), silence(0.5), speech(12.0), silence(0.5)],
+        );
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].start_ms, 0);
         let first_ms = (chunks[0].samples.len() * 1000 / RATE) as u64;

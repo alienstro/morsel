@@ -21,18 +21,34 @@ pub struct Resampler {
 impl Resampler {
     pub fn new(input_rate: u32, channels: u16) -> Result<Self> {
         if channels == 0 || input_rate == 0 {
-            return Err(MorselError::Audio("the device has no channels or no sample rate".into()));
+            return Err(MorselError::Audio(
+                "the device has no channels or no sample rate".into(),
+            ));
         }
         let inner = if input_rate == PIPELINE_RATE {
             None
         } else {
             Some(
-                Fft::<f32>::new(input_rate as usize, PIPELINE_RATE as usize, CHUNK_FRAMES, 1, FixedSync::Input)
-                    .map_err(|e| MorselError::Audio(e.to_string()))?,
+                Fft::<f32>::new(
+                    input_rate as usize,
+                    PIPELINE_RATE as usize,
+                    CHUNK_FRAMES,
+                    1,
+                    FixedSync::Input,
+                )
+                .map_err(|e| MorselError::Audio(e.to_string()))?,
             )
         };
         let skip = inner.as_ref().map(|r| r.output_delay()).unwrap_or(0);
-        Ok(Self { channels: channels as usize, inner, pending: Vec::new(), skip, frames_in: 0, frames_out: 0, input_rate })
+        Ok(Self {
+            channels: channels as usize,
+            inner,
+            pending: Vec::new(),
+            skip,
+            frames_in: 0,
+            frames_out: 0,
+            input_rate,
+        })
     }
 
     /// Takes interleaved device samples and returns the 16 kHz mono samples that are ready.
@@ -62,7 +78,8 @@ impl Resampler {
         let mut out = self.run(&padded, Some(rest.len()));
         // One more empty chunk pushes the resampler delay out.
         out.extend(self.run(&vec![0.0; CHUNK_FRAMES], Some(0)));
-        let expected = (self.frames_in as u64 * PIPELINE_RATE as u64 / self.input_rate as u64) as usize;
+        let expected =
+            (self.frames_in as u64 * PIPELINE_RATE as u64 / self.input_rate as u64) as usize;
         let mut out = self.emit(out);
         out.truncate(expected.saturating_sub(self.frames_out - out.len()));
         out
@@ -79,12 +96,19 @@ impl Resampler {
     }
 
     fn run(&mut self, chunk: &[f32], partial_len: Option<usize>) -> Vec<f32> {
-        let Some(inner) = self.inner.as_mut() else { return Vec::new() };
+        let Some(inner) = self.inner.as_mut() else {
+            return Vec::new();
+        };
         let mut out = vec![0.0f32; inner.output_frames_max()];
         let capacity = out.len();
         let input = InterleavedSlice::new(chunk, 1, chunk.len()).expect("input buffer");
         let mut output = InterleavedSlice::new_mut(&mut out, 1, capacity).expect("output buffer");
-        let indexing = Indexing { input_offset: 0, output_offset: 0, partial_len, active_channels_mask: None };
+        let indexing = Indexing {
+            input_offset: 0,
+            output_offset: 0,
+            partial_len,
+            active_channels_mask: None,
+        };
         match inner.process_into_buffer(&input, &mut output, Some(&indexing)) {
             Ok((_, written)) => {
                 out.truncate(written);

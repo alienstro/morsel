@@ -23,13 +23,22 @@ pub struct VecSink {
 impl VecSink {
     /// The payloads of the events with this name, in order.
     pub fn named(&self, name: &str) -> Vec<Value> {
-        self.events.lock().expect("lock").iter().filter(|(n, _)| n == name).map(|(_, v)| v.clone()).collect()
+        self.events
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, v)| v.clone())
+            .collect()
     }
 }
 
 impl EventSink for VecSink {
     fn emit(&self, name: &str, payload: Value) {
-        self.events.lock().expect("lock").push((name.to_owned(), payload));
+        self.events
+            .lock()
+            .expect("lock")
+            .push((name.to_owned(), payload));
     }
 }
 

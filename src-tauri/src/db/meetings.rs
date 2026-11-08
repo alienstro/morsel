@@ -33,11 +33,20 @@ pub struct MeetingDetail {
     pub note: Option<String>,
 }
 
+/// The title of a meeting that the user did not name.
+pub const UNTITLED: &str = "Untitled meeting";
+
 const SUMMARY_SQL: &str = "SELECT m.id, m.title, t.name, m.status, m.started_at \
      FROM meetings m JOIN templates t ON t.id = m.template_id";
 
 fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<(MeetingId, String, String, String, i64)> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
 }
 
 fn to_summary(raw: (MeetingId, String, String, String, i64)) -> Result<MeetingSummary> {
@@ -57,12 +66,20 @@ fn template_from_row(row: &Row<'_>) -> rusqlite::Result<(i64, String, String, St
 fn to_template(raw: (i64, String, String, String)) -> Result<Template> {
     let sections = serde_json::from_str(&raw.2)
         .map_err(|e| MorselError::Db(format!("template {} sections: {e}", raw.0)))?;
-    Ok(Template { id: raw.0, name: raw.1, sections, instructions: raw.3 })
+    Ok(Template {
+        id: raw.0,
+        name: raw.1,
+        sections,
+        instructions: raw.3,
+    })
 }
 
 pub fn list_templates(conn: &Connection) -> Result<Vec<Template>> {
-    let mut stmt = conn.prepare("SELECT id, name, sections_json, instructions FROM templates ORDER BY id")?;
-    let raws = stmt.query_map([], template_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, sections_json, instructions FROM templates ORDER BY id")?;
+    let raws = stmt
+        .query_map([], template_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     raws.into_iter().map(to_template).collect()
 }
 
@@ -82,7 +99,12 @@ pub fn create_meeting(conn: &Connection, title: &str, template_id: i64) -> Resul
     get_template(conn, template_id)?;
     conn.execute(
         "INSERT INTO meetings (title, template_id, status, started_at) VALUES (?1, ?2, ?3, ?4)",
-        params![title, template_id, MeetingStatus::Recording.as_str(), now_ms()],
+        params![
+            title,
+            template_id,
+            MeetingStatus::Recording.as_str(),
+            now_ms()
+        ],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -100,7 +122,10 @@ pub fn set_status(conn: &Connection, id: MeetingId, status: MeetingStatus) -> Re
 }
 
 pub fn set_title(conn: &Connection, id: MeetingId, title: &str) -> Result<()> {
-    conn.execute("UPDATE meetings SET title = ?1 WHERE id = ?2", params![title, id])?;
+    conn.execute(
+        "UPDATE meetings SET title = ?1 WHERE id = ?2",
+        params![title, id],
+    )?;
     Ok(())
 }
 
@@ -133,7 +158,11 @@ pub fn save_note(conn: &Connection, id: MeetingId, body_md: &str, model: &str) -
 
 pub fn get_meeting(conn: &Connection, id: MeetingId) -> Result<MeetingDetail> {
     let raw = conn
-        .query_row(&format!("{SUMMARY_SQL} WHERE m.id = ?1"), [id], summary_from_row)
+        .query_row(
+            &format!("{SUMMARY_SQL} WHERE m.id = ?1"),
+            [id],
+            summary_from_row,
+        )
         .optional()?
         .ok_or_else(|| MorselError::NotFound(format!("meeting {id}")))?;
     let summary = to_summary(raw)?;
@@ -144,7 +173,12 @@ pub fn get_meeting(conn: &Connection, id: MeetingId) -> Result<MeetingDetail> {
     )?;
     let raws = stmt
         .query_map([id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let lines = raws
@@ -161,19 +195,36 @@ pub fn get_meeting(conn: &Connection, id: MeetingId) -> Result<MeetingDetail> {
         .collect::<Result<Vec<_>>>()?;
 
     let user_notes = conn
-        .query_row("SELECT body FROM user_notes WHERE meeting_id = ?1", [id], |r| r.get(0))
+        .query_row(
+            "SELECT body FROM user_notes WHERE meeting_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
         .optional()?
         .unwrap_or_default();
     let note = conn
-        .query_row("SELECT body_md FROM notes WHERE meeting_id = ?1", [id], |r| r.get(0))
+        .query_row(
+            "SELECT body_md FROM notes WHERE meeting_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
         .optional()?;
 
-    Ok(MeetingDetail { summary, lines, user_notes, note })
+    Ok(MeetingDetail {
+        summary,
+        lines,
+        user_notes,
+        note,
+    })
 }
 
 pub fn list_meetings(conn: &Connection, limit: u32) -> Result<Vec<MeetingSummary>> {
-    let mut stmt = conn.prepare(&format!("{SUMMARY_SQL} ORDER BY m.started_at DESC, m.id DESC LIMIT ?1"))?;
-    let raws = stmt.query_map([limit], summary_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt = conn.prepare(&format!(
+        "{SUMMARY_SQL} ORDER BY m.started_at DESC, m.id DESC LIMIT ?1"
+    ))?;
+    let raws = stmt
+        .query_map([limit], summary_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     raws.into_iter().map(to_summary).collect()
 }
 
@@ -188,4 +239,19 @@ pub fn mark_open_meetings_interrupted(conn: &Connection) -> Result<u32> {
         ],
     )?;
     Ok(changed as u32)
+}
+
+/// Saves the token counts of one model request.
+pub fn record_usage(
+    conn: &Connection,
+    model: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    cost: Option<f64>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO usage (at, model, prompt_tokens, completion_tokens, cost) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![now_ms(), model, prompt_tokens, completion_tokens, cost],
+    )?;
+    Ok(())
 }
