@@ -3,6 +3,7 @@
 pub mod level;
 pub mod mic;
 pub mod source;
+pub mod system_tap;
 pub mod resample;
 
 /// The sample rate of all audio inside the pipeline.

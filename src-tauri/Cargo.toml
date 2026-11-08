@@ -29,6 +29,11 @@ reqwest = { version = "0.13.5", features = ["json", "multipart"] }
 tokio = { version = "1.54.1", features = ["sync", "time", "macros", "rt-multi-thread"] }
 rubato = "5.0.1"
 cpal = "0.18.2"
+objc2-core-audio = "0.3.2"
+objc2-core-audio-types = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2 = "0.6.5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
