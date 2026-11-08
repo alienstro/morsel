@@ -19,6 +19,7 @@ pub struct Template {
 pub struct MeetingSummary {
     pub id: MeetingId,
     pub title: String,
+    pub template_id: i64,
     pub template_name: String,
     pub status: MeetingStatus,
     pub started_at: i64,
@@ -36,26 +37,30 @@ pub struct MeetingDetail {
 /// The title of a meeting that the user did not name.
 pub const UNTITLED: &str = "Untitled meeting";
 
-const SUMMARY_SQL: &str = "SELECT m.id, m.title, t.name, m.status, m.started_at \
+const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at \
      FROM meetings m JOIN templates t ON t.id = m.template_id";
 
-fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<(MeetingId, String, String, String, i64)> {
+type SummaryRow = (MeetingId, String, i64, String, String, i64);
+
+fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<SummaryRow> {
     Ok((
         row.get(0)?,
         row.get(1)?,
         row.get(2)?,
         row.get(3)?,
         row.get(4)?,
+        row.get(5)?,
     ))
 }
 
-fn to_summary(raw: (MeetingId, String, String, String, i64)) -> Result<MeetingSummary> {
+fn to_summary(raw: SummaryRow) -> Result<MeetingSummary> {
     Ok(MeetingSummary {
         id: raw.0,
         title: raw.1,
-        template_name: raw.2,
-        status: MeetingStatus::parse(&raw.3)?,
-        started_at: raw.4,
+        template_id: raw.2,
+        template_name: raw.3,
+        status: MeetingStatus::parse(&raw.4)?,
+        started_at: raw.5,
     })
 }
 

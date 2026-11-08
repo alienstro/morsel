@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tiptap/pm": "^3.33.0",
+    "@tiptap/react": "^3.33.0",
+    "@tiptap/starter-kit": "^3.33.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router": "^8.5.1"

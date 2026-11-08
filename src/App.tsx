@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { BrowserRouter } from "react-router";
-import { AppShell } from "./app/AppShell";
 import { AppRoutes } from "./app/routes";
 import "./styles/tokens.css";
 
@@ -11,9 +10,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <AppShell>
-        <AppRoutes />
-      </AppShell>
+      <AppRoutes />
     </BrowserRouter>
   );
 }
