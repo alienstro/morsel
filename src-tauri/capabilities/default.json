@@ -6,6 +6,21 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "allow-start-meeting",
+    "allow-pause-meeting",
+    "allow-resume-meeting",
+    "allow-stop-meeting",
+    "allow-save-user-notes",
+    "allow-get-meeting",
+    "allow-list-meetings",
+    "allow-list-templates",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-set-api-key",
+    "allow-has-api-key",
+    "allow-test-notes-key",
+    "allow-model-status",
+    "allow-download-model"
   ]
 }
