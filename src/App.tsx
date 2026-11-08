@@ -1,4 +1,8 @@
 import { useEffect } from "react";
+import { BrowserRouter } from "react-router";
+import { AppShell } from "./app/AppShell";
+import { AppRoutes } from "./app/routes";
+import "./styles/tokens.css";
 
 export default function App() {
   useEffect(() => {
@@ -6,8 +10,10 @@ export default function App() {
   }, []);
 
   return (
-    <main>
-      <h1>Morsel</h1>
-    </main>
+    <BrowserRouter>
+      <AppShell>
+        <AppRoutes />
+      </AppShell>
+    </BrowserRouter>
   );
 }
