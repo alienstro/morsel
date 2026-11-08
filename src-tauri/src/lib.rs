@@ -1,8 +1,10 @@
 pub mod audio;
 pub mod chunker;
 pub mod db;
+pub mod events;
 pub mod llm;
 pub mod secrets;
+pub mod session;
 pub mod settings;
 pub mod transcribe;
 pub mod types;

@@ -9,6 +9,10 @@ use crate::types::Result;
 use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/// One connection for the whole app. Each user of it holds the lock for one short query.
+pub type SharedDb = Arc<Mutex<Connection>>;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MIGRATIONS: &[M<'static>] = &[M::up(include_str!("migrations.sql"))];
