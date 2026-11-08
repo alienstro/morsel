@@ -1,0 +1,83 @@
+use super::meetings::*;
+use super::open;
+use crate::types::{MeetingStatus, Speaker, TranscriptLine};
+use rusqlite::Connection;
+
+fn temp_db() -> (tempfile::TempDir, Connection) {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = open(&dir.path().join("morsel.db")).unwrap();
+    (dir, conn)
+}
+
+fn line(meeting_id: i64, speaker: Speaker, start_ms: u64, text: &str) -> TranscriptLine {
+    TranscriptLine { meeting_id, speaker, start_ms, end_ms: start_ms + 1000, text: text.into() }
+}
+
+#[test]
+fn open_runs_migrations_twice_without_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("morsel.db");
+    drop(open(&path).unwrap());
+    let conn = open(&path).unwrap();
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 5);
+}
+
+#[test]
+fn seeds_five_templates() {
+    let (_d, conn) = temp_db();
+    let names: Vec<String> = list_templates(&conn).unwrap().into_iter().map(|t| t.name).collect();
+    assert_eq!(names, ["General", "1:1", "Sales call", "Stand-up", "Product sync"]);
+    let general = get_template(&conn, 1).unwrap();
+    assert_eq!(general.sections, ["Summary", "Key points", "Decisions", "Action items"]);
+}
+
+#[test]
+fn lines_come_back_in_start_order() {
+    let (_d, conn) = temp_db();
+    let id = create_meeting(&conn, "Weekly product sync", 5).unwrap();
+    add_line(&conn, &line(id, Speaker::Others, 20_000, "second")).unwrap();
+    add_line(&conn, &line(id, Speaker::You, 5_000, "first")).unwrap();
+    let detail = get_meeting(&conn, id).unwrap();
+    let texts: Vec<&str> = detail.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["first", "second"]);
+    assert_eq!(detail.lines[0].speaker, Speaker::You);
+    assert_eq!(detail.summary.template_name, "Product sync");
+    assert_eq!(detail.summary.status, MeetingStatus::Recording);
+}
+
+#[test]
+fn user_notes_upsert_keeps_one_row() {
+    let (_d, conn) = temp_db();
+    let id = create_meeting(&conn, "1:1 with Sam", 2).unwrap();
+    save_user_notes(&conn, id, "budget ok").unwrap();
+    save_user_notes(&conn, id, "budget ok for Q1").unwrap();
+    let rows: i64 = conn.query_row("SELECT COUNT(*) FROM user_notes", [], |r| r.get(0)).unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(get_meeting(&conn, id).unwrap().user_notes, "budget ok for Q1");
+}
+
+#[test]
+fn mark_open_meetings_interrupted_changes_only_recording_and_paused() {
+    let (_d, conn) = temp_db();
+    let recording = create_meeting(&conn, "a", 1).unwrap();
+    let paused = create_meeting(&conn, "b", 1).unwrap();
+    let done = create_meeting(&conn, "c", 1).unwrap();
+    set_status(&conn, paused, MeetingStatus::Paused).unwrap();
+    set_status(&conn, done, MeetingStatus::Done).unwrap();
+    assert_eq!(mark_open_meetings_interrupted(&conn).unwrap(), 2);
+    assert_eq!(get_meeting(&conn, recording).unwrap().summary.status, MeetingStatus::Interrupted);
+    assert_eq!(get_meeting(&conn, paused).unwrap().summary.status, MeetingStatus::Interrupted);
+    assert_eq!(get_meeting(&conn, done).unwrap().summary.status, MeetingStatus::Done);
+}
+
+#[test]
+fn save_note_and_list_meetings_newest_first() {
+    let (_d, conn) = temp_db();
+    let a = create_meeting(&conn, "first", 1).unwrap();
+    let b = create_meeting(&conn, "second", 1).unwrap();
+    save_note(&conn, a, "## Summary\nok", "model-x").unwrap();
+    assert_eq!(get_meeting(&conn, a).unwrap().note.as_deref(), Some("## Summary\nok"));
+    let ids: Vec<i64> = list_meetings(&conn, 10).unwrap().iter().map(|m| m.id).collect();
+    assert_eq!(ids, [b, a]);
+}

@@ -1,3 +1,6 @@
+pub mod db;
+pub mod types;
+
 use tauri::{Builder, Runtime};
 
 /// Adds the Morsel plugins, state and commands to a Tauri builder.
