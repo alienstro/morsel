@@ -4,6 +4,7 @@ pub mod db;
 pub mod llm;
 pub mod secrets;
 pub mod settings;
+pub mod transcribe;
 pub mod types;
 
 use tauri::{Builder, Runtime};
