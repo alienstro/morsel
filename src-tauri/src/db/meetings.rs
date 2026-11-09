@@ -1,18 +1,10 @@
 //! Meetings, transcript lines, rough notes, finished notes and templates.
 
+use super::library::reindex_meeting;
 use super::now_ms;
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result, Speaker, TranscriptLine};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Template {
-    pub id: i64,
-    pub name: String,
-    pub sections: Vec<String>,
-    pub instructions: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +15,8 @@ pub struct MeetingSummary {
     pub template_name: String,
     pub status: MeetingStatus,
     pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub people: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,71 +31,51 @@ pub struct MeetingDetail {
 /// The title of a meeting that the user did not name.
 pub const UNTITLED: &str = "Untitled meeting";
 
-const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at \
+pub(crate) const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at, m.ended_at, m.people \
      FROM meetings m JOIN templates t ON t.id = m.template_id";
 
-type SummaryRow = (MeetingId, String, i64, String, String, i64);
-
-fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<SummaryRow> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-    ))
+/// The raw columns of `SUMMARY_SQL`, before the status and the people are parsed.
+pub(crate) struct SummaryRow {
+    id: MeetingId,
+    title: String,
+    template_id: i64,
+    template_name: String,
+    status: String,
+    started_at: i64,
+    ended_at: Option<i64>,
+    people: String,
 }
 
-fn to_summary(raw: SummaryRow) -> Result<MeetingSummary> {
+pub(crate) fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<SummaryRow> {
+    Ok(SummaryRow {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        template_id: row.get(2)?,
+        template_name: row.get(3)?,
+        status: row.get(4)?,
+        started_at: row.get(5)?,
+        ended_at: row.get(6)?,
+        people: row.get(7)?,
+    })
+}
+
+pub(crate) fn to_summary(raw: SummaryRow) -> Result<MeetingSummary> {
+    let people = serde_json::from_str(&raw.people)
+        .map_err(|e| MorselError::Db(format!("meeting {} people: {e}", raw.id)))?;
     Ok(MeetingSummary {
-        id: raw.0,
-        title: raw.1,
-        template_id: raw.2,
-        template_name: raw.3,
-        status: MeetingStatus::parse(&raw.4)?,
-        started_at: raw.5,
+        id: raw.id,
+        title: raw.title,
+        template_id: raw.template_id,
+        template_name: raw.template_name,
+        status: MeetingStatus::parse(&raw.status)?,
+        started_at: raw.started_at,
+        ended_at: raw.ended_at,
+        people,
     })
-}
-
-fn template_from_row(row: &Row<'_>) -> rusqlite::Result<(i64, String, String, String)> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-}
-
-fn to_template(raw: (i64, String, String, String)) -> Result<Template> {
-    let sections = serde_json::from_str(&raw.2)
-        .map_err(|e| MorselError::Db(format!("template {} sections: {e}", raw.0)))?;
-    Ok(Template {
-        id: raw.0,
-        name: raw.1,
-        sections,
-        instructions: raw.3,
-    })
-}
-
-pub fn list_templates(conn: &Connection) -> Result<Vec<Template>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, sections_json, instructions FROM templates ORDER BY id")?;
-    let raws = stmt
-        .query_map([], template_from_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    raws.into_iter().map(to_template).collect()
-}
-
-pub fn get_template(conn: &Connection, id: i64) -> Result<Template> {
-    let raw = conn
-        .query_row(
-            "SELECT id, name, sections_json, instructions FROM templates WHERE id = ?1",
-            [id],
-            template_from_row,
-        )
-        .optional()?
-        .ok_or_else(|| MorselError::NotFound(format!("template {id}")))?;
-    to_template(raw)
 }
 
 pub fn create_meeting(conn: &Connection, title: &str, template_id: i64) -> Result<MeetingId> {
-    get_template(conn, template_id)?;
+    super::templates::get(conn, template_id)?;
     conn.execute(
         "INSERT INTO meetings (title, template_id, status, started_at) VALUES (?1, ?2, ?3, ?4)",
         params![
@@ -123,7 +97,7 @@ pub fn set_status(conn: &Connection, id: MeetingId, status: MeetingStatus) -> Re
     if changed == 0 {
         return Err(MorselError::NotFound(format!("meeting {id}")));
     }
-    Ok(())
+    reindex_meeting(conn, id)
 }
 
 pub fn set_title(conn: &Connection, id: MeetingId, title: &str) -> Result<()> {
@@ -131,7 +105,7 @@ pub fn set_title(conn: &Connection, id: MeetingId, title: &str) -> Result<()> {
         "UPDATE meetings SET title = ?1 WHERE id = ?2",
         params![title, id],
     )?;
-    Ok(())
+    reindex_meeting(conn, id)
 }
 
 pub fn add_line(conn: &Connection, line: &TranscriptLine) -> Result<()> {
@@ -148,7 +122,7 @@ pub fn save_user_notes(conn: &Connection, id: MeetingId, body: &str) -> Result<(
          ON CONFLICT(meeting_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at",
         params![id, body, now_ms()],
     )?;
-    Ok(())
+    reindex_meeting(conn, id)
 }
 
 pub fn save_note(conn: &Connection, id: MeetingId, body_md: &str, model: &str) -> Result<()> {
@@ -158,7 +132,7 @@ pub fn save_note(conn: &Connection, id: MeetingId, body_md: &str, model: &str) -
          created_at = excluded.created_at",
         params![id, body_md, model, now_ms()],
     )?;
-    Ok(())
+    reindex_meeting(conn, id)
 }
 
 pub fn get_meeting(conn: &Connection, id: MeetingId) -> Result<MeetingDetail> {
@@ -233,17 +207,23 @@ pub fn list_meetings(conn: &Connection, limit: u32) -> Result<Vec<MeetingSummary
     raws.into_iter().map(to_summary).collect()
 }
 
-/// Marks meetings that were recording or paused when the app stopped. Returns the count.
+/// Marks meetings that were recording or paused when the app stopped, and indexes their
+/// transcript for search (lines are not indexed while a meeting records). Returns the count.
 pub fn mark_open_meetings_interrupted(conn: &Connection) -> Result<u32> {
-    let changed = conn.execute(
-        "UPDATE meetings SET status = ?1 WHERE status IN (?2, ?3)",
-        params![
-            MeetingStatus::Interrupted.as_str(),
-            MeetingStatus::Recording.as_str(),
-            MeetingStatus::Paused.as_str()
-        ],
-    )?;
-    Ok(changed as u32)
+    let open: Vec<MeetingId> = conn
+        .prepare("SELECT id FROM meetings WHERE status IN (?1, ?2)")?
+        .query_map(
+            params![
+                MeetingStatus::Recording.as_str(),
+                MeetingStatus::Paused.as_str()
+            ],
+            |r| r.get(0),
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    for id in &open {
+        set_status(conn, *id, MeetingStatus::Interrupted)?;
+    }
+    Ok(open.len() as u32)
 }
 
 /// Saves the token counts of one model request.

@@ -5,9 +5,8 @@ use super::prompt::{
     clean_title, estimate_tokens, split_lines, summary_messages, title_messages, transcript_text,
 };
 use crate::db::SharedDb;
-use crate::db::meetings::{
-    UNTITLED, get_meeting, get_template, record_usage, save_note, set_status, set_title,
-};
+use crate::db::meetings::{UNTITLED, get_meeting, record_usage, save_note, set_status, set_title};
+use crate::db::templates;
 use crate::events::{EventSink, NOTES_DONE, NOTES_FAILED, STATUS};
 use crate::llm::{ChatMessage, LlmConfig, chat};
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
@@ -89,7 +88,7 @@ async fn run(
 ) -> Result<()> {
     let (detail, template) = {
         let conn = ctx.db.lock().expect("db lock");
-        (get_meeting(&conn, id)?, get_template(&conn, template_id)?)
+        (get_meeting(&conn, id)?, templates::get(&conn, template_id)?)
     };
     let messages = if estimate_tokens(&transcript_text(&detail.lines)) > LONG_TRANSCRIPT_TOKENS {
         let parts = split_lines(&detail.lines, PART_TOKENS);

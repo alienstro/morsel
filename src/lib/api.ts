@@ -9,9 +9,22 @@ export type MeetingStatus =
 export type TranscriptLine = { meetingId: number; speaker: Speaker; startMs: number; endMs: number; text: string };
 export type MeetingSummary = {
   id: number; title: string; templateId: number; templateName: string; status: MeetingStatus; startedAt: number;
+  endedAt: number | null; people: string[];
 };
 export type MeetingDetail = { summary: MeetingSummary; lines: TranscriptLine[]; userNotes: string; note: string | null };
-export type Template = { id: number; name: string; sections: string[]; instructions: string };
+export type Section = { name: string; hint: string };
+export type TemplateInput = { name: string; description: string; sections: Section[]; instructions: string };
+export type Template = TemplateInput & { id: number; builtIn: boolean; uses: number };
+export type NotesFilter = {
+  query?: string | null; templateId?: number | null; person?: string | null; from?: number | null; to?: number | null;
+  limit: number; offset: number;
+};
+export type NotesPage = { items: MeetingSummary[]; total: number };
+export type AskRange = "all" | "week" | "month";
+export type AskSource = { meetingId: number; title: string; startedAt: number };
+export type AskAnswer = { id: number | null; question: string; answer: string; sources: AskSource[] };
+export type UsageTotal = { promptTokens: number; completionTokens: number; cost: number | null };
+export type DataInfo = { path: string; notes: number; bytes: number };
 export type Settings = {
   notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
@@ -42,6 +55,20 @@ export const api = {
   modelStatus: () => invoke<boolean>("model_status"),
   downloadModel: () => invoke<void>("download_model"),
   exportNote: (meetingId: number, path: string) => invoke<void>("export_note", { meetingId, path }),
+  searchNotes: (filter: NotesFilter) => invoke<NotesPage>("search_notes", { filter }),
+  listPeople: () => invoke<string[]>("list_people"),
+  deleteMeeting: (meetingId: number) => invoke<void>("delete_meeting", { meetingId }),
+  saveTemplate: (id: number | null, input: TemplateInput) => invoke<number>("save_template", { id, input }),
+  duplicateTemplate: (id: number) => invoke<number>("duplicate_template", { id }),
+  deleteTemplate: (id: number) => invoke<void>("delete_template", { id }),
+  resetTemplate: (id: number) => invoke<void>("reset_template", { id }),
+  ask: (question: string, range: AskRange, meetingId: number | null) => invoke<AskAnswer>("ask", { question, range, meetingId }),
+  listAsks: (limit: number) => invoke<AskAnswer[]>("list_asks", { limit }),
+  getAsk: (id: number) => invoke<AskAnswer>("get_ask", { id }),
+  usageSummary: () => invoke<UsageTotal>("usage_summary"),
+  dataInfo: () => invoke<DataInfo>("data_info"),
+  exportAll: (dir: string) => invoke<number>("export_all", { dir }),
+  deleteAllData: () => invoke<void>("delete_all_data"),
 };
 
 function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {

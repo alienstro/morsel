@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import { Outlet, Route, Routes, useLocation, useNavigate } from "react-router";
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router";
 import { api } from "../lib/api";
 import { MeetingScreen } from "../screens/meeting/MeetingScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NoteScreen } from "../screens/note/NoteScreen";
 import { SettingsModelsScreen } from "../screens/SettingsModelsScreen";
 import { WritingScreen } from "../screens/note/WritingScreen";
+import { AskScreen } from "../screens/ask/AskScreen";
+import { NotesScreen } from "../screens/notes/NotesScreen";
+import { SettingsLayout, SettingsPending } from "../screens/settings/SettingsLayout";
+import { SettingsPrivacyScreen } from "../screens/settings/SettingsPrivacyScreen";
+import { TemplatesScreen } from "../screens/templates/TemplatesScreen";
 import { AppShell, type RecentItem } from "./AppShell";
 
 function ComingSoon() {
@@ -16,13 +21,15 @@ function ShellLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [recent, setRecent] = useState<RecentItem[]>([]);
+  const [noteCount, setNoteCount] = useState(0);
 
   useEffect(() => {
     api.listMeetings(3).then((m) => setRecent(m.map(({ id, title }) => ({ id, title })))).catch(() => {});
+    api.searchNotes({ limit: 0, offset: 0 }).then((p) => setNoteCount(p.total)).catch(() => {});
   }, [pathname]);
 
   return (
-    <AppShell recent={recent} onNewNote={() => navigate("/")}>
+    <AppShell recent={recent} noteCount={noteCount} onNewNote={() => navigate("/")}>
       <Outlet />
     </AppShell>
   );
@@ -37,8 +44,18 @@ export function AppRoutes() {
         <Route path="/" element={<HomeScreen />} />
         <Route path="/meeting/:id/writing" element={<WritingScreen />} />
         <Route path="/note/:id" element={<NoteScreen />} />
-        <Route path="/settings/models" element={<SettingsModelsScreen />} />
+        <Route path="/notes" element={<NotesScreen />} />
+        <Route path="/templates" element={<TemplatesScreen />} />
+        <Route path="/ask" element={<AskScreen />} />
+        <Route path="/ask/:id" element={<AskScreen />} />
         <Route path="*" element={<ComingSoon />} />
+      </Route>
+      <Route element={<SettingsLayout />}>
+        <Route path="/settings" element={<Navigate to="/settings/models" replace />} />
+        <Route path="/settings/models" element={<SettingsModelsScreen />} />
+        <Route path="/settings/privacy" element={<SettingsPrivacyScreen />} />
+        <Route path="/settings/calendar" element={<SettingsPending title="Calendar" />} />
+        <Route path="/settings/shortcuts" element={<SettingsPending title="Shortcuts" />} />
       </Route>
     </Routes>
   );

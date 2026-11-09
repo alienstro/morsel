@@ -1,12 +1,15 @@
 //! The commands that the frontend calls. Each command is a thin call into an `AppState` method.
 
+use crate::ask::{self, AskAnswer, AskRange};
 use crate::audio::{mic::MicSource, source::AudioSource, system_tap::SystemTapSource};
-use crate::db::SharedDb;
-use crate::db::meetings::{self, MeetingDetail, MeetingSummary, Template};
+use crate::db::library::{self, NotesFilter, NotesPage, UsageTotal};
+use crate::db::meetings::{self, MeetingDetail, MeetingSummary};
+use crate::db::templates::{self, Template, TemplateInput};
+use crate::db::{SharedDb, now_ms};
 use crate::events::{EventSink, MODEL_DOWNLOAD};
 use crate::llm::{self, LlmConfig};
 use crate::notes::writer::{CancellationToken, NotesContext};
-use crate::secrets::{NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
+use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
 use crate::session::MeetingSession;
 use crate::settings::{self, Settings, TranscribeMode};
 use crate::transcribe::Transcriber;
@@ -14,6 +17,7 @@ use crate::transcribe::cloud::CloudTranscriber;
 use crate::transcribe::model_download::{ensure_model, model_ready};
 use crate::transcribe::parakeet::ParakeetTranscriber;
 use crate::types::{MeetingId, MorselError, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -86,12 +90,51 @@ impl Engines for RealEngines {
     }
 }
 
+/// Where Morsel keeps its data, the count of notes, and the size on disk without the speech model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataInfo {
+    pub path: String,
+    pub notes: u32,
+    pub bytes: u64,
+}
+
+const THIRTY_DAYS_MS: i64 = 30 * 86_400_000;
+
+/// The quick model, or the notes model when the quick model is empty.
+fn quick_model_name(settings: &Settings) -> &str {
+    if settings.quick_model.trim().is_empty() {
+        &settings.notes_model
+    } else {
+        &settings.quick_model
+    }
+}
+
+/// A file name that every file system accepts: no path or wildcard characters.
+fn safe_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            c if c.is_control() => '-',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_start_matches('.');
+    if trimmed.is_empty() {
+        "Untitled".to_owned()
+    } else {
+        trimmed.chars().take(120).collect()
+    }
+}
+
 pub struct AppState {
     pub db: SharedDb,
     pub secrets: Arc<dyn SecretStore>,
     pub http: reqwest::Client,
     pub sink: Arc<dyn EventSink>,
     engines: Arc<dyn Engines>,
+    data_dir: PathBuf,
     model_dir: PathBuf,
     session: tokio::sync::Mutex<Option<MeetingSession>>,
     notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
@@ -104,6 +147,7 @@ impl AppState {
         http: reqwest::Client,
         sink: Arc<dyn EventSink>,
         engines: Arc<dyn Engines>,
+        data_dir: PathBuf,
         model_dir: PathBuf,
     ) -> Self {
         Self {
@@ -112,6 +156,7 @@ impl AppState {
             http,
             sink,
             engines,
+            data_dir,
             model_dir,
             session: tokio::sync::Mutex::new(None),
             notes_jobs: Arc::new(Mutex::new(HashMap::new())),
@@ -196,7 +241,7 @@ impl AppState {
     }
 
     pub fn list_templates(&self) -> Result<Vec<Template>> {
-        meetings::list_templates(&self.conn())
+        templates::list(&self.conn())
     }
 
     pub fn save_settings(&self, value: &Settings) -> Result<()> {
@@ -248,13 +293,8 @@ impl AppState {
                 "choose a notes model in Settings first".into(),
             ));
         }
-        let quick_model = if settings.quick_model.trim().is_empty() {
-            &settings.notes_model
-        } else {
-            &settings.quick_model
-        };
         let quick = LlmConfig {
-            model: quick_model.clone(),
+            model: quick_model_name(&settings).to_owned(),
             ..notes.clone()
         };
         let ctx = NotesContext {
@@ -301,6 +341,149 @@ impl AppState {
             path,
             format!("# {}\n\n{}\n", detail.summary.title, note.trim_end()),
         )?;
+        Ok(())
+    }
+
+    pub fn search_notes(&self, filter: &NotesFilter) -> Result<NotesPage> {
+        library::search_meetings(&self.conn(), filter)
+    }
+
+    pub fn list_people(&self) -> Result<Vec<String>> {
+        library::list_people(&self.conn())
+    }
+
+    /// Deletes a meeting and everything in it. The meeting that records now cannot be deleted.
+    pub async fn delete_meeting(&self, meeting_id: MeetingId) -> Result<()> {
+        if let Some(session) = self.session.lock().await.as_ref()
+            && session.id() == meeting_id
+        {
+            return Err(MorselError::AlreadyRecording);
+        }
+        self.cancel_notes(meeting_id);
+        library::delete_meeting(&self.conn(), meeting_id)
+    }
+
+    /// Creates a template when `id` is `None`, else changes it. Returns the id.
+    pub fn save_template(&self, id: Option<i64>, input: &TemplateInput) -> Result<i64> {
+        let conn = self.conn();
+        match id {
+            Some(id) => templates::update(&conn, id, input).map(|_| id),
+            None => templates::create(&conn, input),
+        }
+    }
+
+    pub fn duplicate_template(&self, id: i64) -> Result<i64> {
+        templates::duplicate(&self.conn(), id)
+    }
+
+    pub fn delete_template(&self, id: i64) -> Result<()> {
+        templates::delete(&self.conn(), id)
+    }
+
+    pub fn reset_template(&self, id: i64) -> Result<()> {
+        templates::reset(&self.conn(), id)
+    }
+
+    pub async fn ask(
+        &self,
+        question: &str,
+        range: AskRange,
+        meeting_id: Option<MeetingId>,
+    ) -> Result<AskAnswer> {
+        let settings = self.settings()?;
+        let quick = self.notes_config(quick_model_name(&settings))?;
+        if quick.model.trim().is_empty() {
+            return Err(MorselError::Invalid(
+                "choose a notes model in Settings first".into(),
+            ));
+        }
+        ask::ask(&self.db, &self.http, &quick, question, range, meeting_id).await
+    }
+
+    pub fn list_asks(&self, limit: u32) -> Result<Vec<AskAnswer>> {
+        library::list_asks(&self.conn(), limit)
+    }
+
+    pub fn get_ask(&self, id: i64) -> Result<AskAnswer> {
+        library::get_ask(&self.conn(), id)
+    }
+
+    /// The tokens of the last 30 days.
+    pub fn usage_summary(&self) -> Result<UsageTotal> {
+        library::usage_since(&self.conn(), now_ms() - THIRTY_DAYS_MS)
+    }
+
+    pub fn data_info(&self) -> Result<DataInfo> {
+        let notes = library::count_meetings(&self.conn())?;
+        let mut bytes = 0;
+        if let Ok(entries) = std::fs::read_dir(&self.data_dir) {
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata()
+                    && meta.is_file()
+                {
+                    bytes += meta.len();
+                }
+            }
+        }
+        Ok(DataInfo {
+            path: self.data_dir.to_string_lossy().into_owned(),
+            notes,
+            bytes,
+        })
+    }
+
+    /// Writes each finished note as `<date> <title>.md` into `dir`. Returns the count of files.
+    pub fn export_all(&self, dir: &std::path::Path) -> Result<u32> {
+        let rows: Vec<(String, String, String)> = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare(
+                "SELECT date(m.started_at / 1000, 'unixepoch', 'localtime'), m.title, n.body_md \
+                 FROM meetings m JOIN notes n ON n.meeting_id = m.id ORDER BY m.started_at, m.id",
+            )?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut used = std::collections::HashSet::new();
+        for (date, title, body) in &rows {
+            let base = format!("{date} {}", safe_file_name(title));
+            let mut name = format!("{base}.md");
+            let mut n = 2;
+            while !used.insert(name.clone()) || dir.join(&name).exists() {
+                name = format!("{base} ({n}).md");
+                n += 1;
+            }
+            std::fs::write(
+                dir.join(&name),
+                format!("# {title}\n\n{}\n", body.trim_end()),
+            )?;
+        }
+        Ok(rows.len() as u32)
+    }
+
+    /// Deletes every meeting, note, question, usage row, setting and key, and resets the templates.
+    pub async fn delete_all_data(&self) -> Result<()> {
+        let session = self.session.lock().await;
+        if session.is_some() {
+            return Err(MorselError::AlreadyRecording);
+        }
+        for token in self.notes_jobs.lock().expect("jobs lock").values() {
+            token.cancel();
+        }
+        {
+            let mut conn = self.conn();
+            let tx = conn.transaction()?;
+            tx.execute_batch(
+                "DELETE FROM meetings; DELETE FROM meeting_search; DELETE FROM asks; \
+                 DELETE FROM usage; DELETE FROM settings; DELETE FROM templates WHERE built_in = 0;",
+            )?;
+            templates::write_all_built_ins(&tx)?;
+            tx.commit()?;
+            conn.execute_batch("VACUUM;")?;
+        }
+        for account in ACCOUNTS {
+            self.secrets.delete(account)?;
+        }
+        drop(session);
         Ok(())
     }
 
@@ -435,6 +618,85 @@ pub async fn download_model(state: State<'_, AppState>) -> Result<()> {
     state.download_model().await
 }
 
+#[tauri::command]
+pub async fn search_notes(state: State<'_, AppState>, filter: NotesFilter) -> Result<NotesPage> {
+    state.search_notes(&filter)
+}
+
+#[tauri::command]
+pub async fn list_people(state: State<'_, AppState>) -> Result<Vec<String>> {
+    state.list_people()
+}
+
+#[tauri::command]
+pub async fn delete_meeting(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<()> {
+    state.delete_meeting(meeting_id).await
+}
+
+#[tauri::command]
+pub async fn save_template(
+    state: State<'_, AppState>,
+    id: Option<i64>,
+    input: TemplateInput,
+) -> Result<i64> {
+    state.save_template(id, &input)
+}
+
+#[tauri::command]
+pub async fn duplicate_template(state: State<'_, AppState>, id: i64) -> Result<i64> {
+    state.duplicate_template(id)
+}
+
+#[tauri::command]
+pub async fn delete_template(state: State<'_, AppState>, id: i64) -> Result<()> {
+    state.delete_template(id)
+}
+
+#[tauri::command]
+pub async fn reset_template(state: State<'_, AppState>, id: i64) -> Result<()> {
+    state.reset_template(id)
+}
+
+#[tauri::command]
+pub async fn ask(
+    state: State<'_, AppState>,
+    question: String,
+    range: AskRange,
+    meeting_id: Option<MeetingId>,
+) -> Result<AskAnswer> {
+    state.ask(&question, range, meeting_id).await
+}
+
+#[tauri::command]
+pub async fn list_asks(state: State<'_, AppState>, limit: u32) -> Result<Vec<AskAnswer>> {
+    state.list_asks(limit)
+}
+
+#[tauri::command]
+pub async fn get_ask(state: State<'_, AppState>, id: i64) -> Result<AskAnswer> {
+    state.get_ask(id)
+}
+
+#[tauri::command]
+pub async fn usage_summary(state: State<'_, AppState>) -> Result<UsageTotal> {
+    state.usage_summary()
+}
+
+#[tauri::command]
+pub async fn data_info(state: State<'_, AppState>) -> Result<DataInfo> {
+    state.data_info()
+}
+
+#[tauri::command]
+pub async fn export_all(state: State<'_, AppState>, dir: PathBuf) -> Result<u32> {
+    state.export_all(&dir)
+}
+
+#[tauri::command]
+pub async fn delete_all_data(state: State<'_, AppState>) -> Result<()> {
+    state.delete_all_data().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,6 +744,7 @@ mod tests {
             reqwest::Client::new(),
             Arc::new(VecSink::default()),
             Arc::new(FakeEngines),
+            dir.path().to_path_buf(),
             dir.path().join("models"),
         );
         (dir, state)
@@ -566,5 +829,178 @@ mod tests {
             s.pause_meeting().await,
             Err(MorselError::NotRecording)
         ));
+    }
+
+    fn finished(s: &AppState, title: &str, note: Option<&str>) -> MeetingId {
+        let conn = s.db.lock().unwrap();
+        let id = crate::db::meetings::create_meeting(&conn, title, 1).unwrap();
+        conn.execute(
+            "UPDATE meetings SET started_at = 1762560000000 WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        if let Some(note) = note {
+            crate::db::meetings::save_note(&conn, id, note, "m").unwrap();
+        }
+        id
+    }
+
+    fn file_names(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn export_all_writes_one_file_per_note() {
+        let (dir, s) = state();
+        finished(&s, "Weekly sync", Some("## Summary\n- ok"));
+        finished(&s, "Pricing", Some("## Budget\n- 20k"));
+        finished(&s, "No note yet", None);
+        let out = dir.path().join("export");
+        std::fs::create_dir(&out).unwrap();
+        assert_eq!(s.export_all(&out).unwrap(), 2);
+        let names = file_names(&out);
+        assert_eq!(names.len(), 2);
+        assert!(names.iter().any(|n| n.ends_with(" Weekly sync.md")));
+        let pricing = names.iter().find(|n| n.ends_with(" Pricing.md")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join(pricing)).unwrap(),
+            "# Pricing\n\n## Budget\n- 20k\n"
+        );
+    }
+
+    #[test]
+    fn export_all_makes_safe_unique_names() {
+        let (dir, s) = state();
+        finished(&s, "A/B: plan?", Some("x"));
+        finished(&s, "A/B: plan?", Some("y"));
+        let out = dir.path().join("export");
+        std::fs::create_dir(&out).unwrap();
+        s.export_all(&out).unwrap();
+        let names = file_names(&out);
+        assert_eq!(names.len(), 2);
+        assert!(
+            names[0].ends_with(" A-B- plan- (2).md") || names[1].ends_with(" A-B- plan- (2).md")
+        );
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.contains('/') && !n.contains(':') && !n.contains('?'))
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_all_clears_data_and_keys_and_keeps_built_ins() {
+        let (_d, s) = state();
+        finished(&s, "Gone", Some("note"));
+        s.set_api_key(NOTES_KEY, "sk-1").unwrap();
+        s.set_api_key(TRANSCRIBE_KEY, "gsk-1").unwrap();
+        let mut changed = s.settings().unwrap();
+        changed.language = "de".into();
+        s.save_settings(&changed).unwrap();
+        let custom = s
+            .save_template(
+                None,
+                &templates::TemplateInput {
+                    name: "Mine".into(),
+                    description: String::new(),
+                    sections: vec![templates::Section {
+                        name: "A".into(),
+                        hint: String::new(),
+                    }],
+                    instructions: String::new(),
+                },
+            )
+            .unwrap();
+        s.save_template(
+            Some(2),
+            &templates::TemplateInput {
+                name: "Changed".into(),
+                description: String::new(),
+                sections: vec![templates::Section {
+                    name: "A".into(),
+                    hint: String::new(),
+                }],
+                instructions: String::new(),
+            },
+        )
+        .unwrap();
+
+        s.delete_all_data().await.unwrap();
+
+        assert!(s.list_meetings(10).unwrap().is_empty());
+        assert!(!s.has_api_key(NOTES_KEY).unwrap());
+        assert!(!s.has_api_key(TRANSCRIBE_KEY).unwrap());
+        assert_eq!(s.settings().unwrap(), Settings::default());
+        let all = s.list_templates().unwrap();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[1].name, "1:1");
+        assert!(all.iter().all(|t| t.id != custom));
+        assert_eq!(s.data_info().unwrap().notes, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_all_refuses_while_recording() {
+        let (_d, s) = state();
+        s.start_meeting(None, 1).await.unwrap();
+        assert!(matches!(
+            s.delete_all_data().await,
+            Err(MorselError::AlreadyRecording)
+        ));
+        assert_eq!(s.list_meetings(10).unwrap().len(), 1);
+        s.stop_meeting().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_recording_meeting_is_refused() {
+        let (_d, s) = state();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert!(matches!(
+            s.delete_meeting(id).await,
+            Err(MorselError::AlreadyRecording)
+        ));
+        s.stop_meeting().await.unwrap();
+        s.delete_meeting(id).await.unwrap();
+        assert!(s.get_meeting(id).is_err());
+    }
+
+    #[test]
+    fn usage_summary_counts_last_30_days() {
+        let (_d, s) = state();
+        {
+            let conn = s.db.lock().unwrap();
+            crate::db::meetings::record_usage(&conn, "m", 100, 10, None).unwrap();
+            crate::db::meetings::record_usage(&conn, "m", 7, 3, None).unwrap();
+            conn.execute("UPDATE usage SET at = at - 31 * 86400000 WHERE id = 1", [])
+                .unwrap();
+        }
+        let total = s.usage_summary().unwrap();
+        assert_eq!(total.prompt_tokens, 7);
+        assert_eq!(total.completion_tokens, 3);
+        assert_eq!(total.cost, None);
+    }
+
+    #[test]
+    fn data_info_counts_notes_and_skips_the_model() {
+        let (dir, s) = state();
+        finished(&s, "One", Some("x"));
+        std::fs::create_dir_all(dir.path().join("models")).unwrap();
+        std::fs::write(
+            dir.path().join("models").join("big.bin"),
+            vec![0u8; 5_000_000],
+        )
+        .unwrap();
+        let info = s.data_info().unwrap();
+        assert_eq!(info.notes, 1);
+        assert!(
+            info.bytes > 0 && info.bytes < 5_000_000,
+            "bytes {}",
+            info.bytes
+        );
+        assert_eq!(info.path, dir.path().to_string_lossy());
     }
 }

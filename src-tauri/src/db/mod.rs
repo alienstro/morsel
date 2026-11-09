@@ -1,6 +1,8 @@
 //! The SQLite database of Morsel: one file in the app data folder.
 
+pub mod library;
 pub mod meetings;
+pub mod templates;
 
 #[cfg(test)]
 mod tests;
@@ -15,14 +17,20 @@ use std::sync::{Arc, Mutex};
 pub type SharedDb = Arc<Mutex<Connection>>;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MIGRATIONS: &[M<'static>] = &[M::up(include_str!("migrations.sql"))];
+/// The schema steps, oldest first. Step 2 also writes the built-in template values.
+pub(crate) fn migrations() -> Vec<M<'static>> {
+    vec![
+        M::up(include_str!("migrations.sql")),
+        M::up_with_hook(include_str!("migrations_2.sql"), templates::write_built_ins),
+    ]
+}
 
 /// Opens the database, turns on WAL and foreign keys, and runs the migrations.
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    Migrations::from_slice(MIGRATIONS)
+    Migrations::new(migrations())
         .to_latest(&mut conn)
         .map_err(|e| crate::types::MorselError::Db(e.to_string()))?;
     Ok(conn)

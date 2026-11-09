@@ -5,13 +5,14 @@ export type RecentItem = { id: number; title: string };
 
 type Props = {
   recent?: RecentItem[];
+  noteCount?: number;
   onNewNote?: () => void;
   children: ReactNode;
 };
 
 const stroke = { fill: "none", stroke: "currentColor", strokeWidth: 1.8 } as const;
 
-export function AppShell({ recent = [], onNewNote, children }: Props) {
+export function AppShell({ recent = [], noteCount, onNewNote, children }: Props) {
   return (
     <div className="shell">
       <div className="titlebar" data-tauri-drag-region>
@@ -32,9 +33,10 @@ export function AppShell({ recent = [], onNewNote, children }: Props) {
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" {...stroke}><path d="M4 11l8-6 8 6v9H4z" /></svg>
               Home
             </NavLink>
-            <NavLink to="/notes" className="nav-link">
+            <NavLink to="/notes" className="nav-link" aria-label={noteCount ? `Notes, ${noteCount} notes` : undefined}>
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" {...stroke}><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h7M9 16h5" /></svg>
               Notes
+              {noteCount ? <span aria-hidden="true" className="nav-count">{noteCount}</span> : null}
             </NavLink>
             <NavLink to="/templates" className="nav-link">
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" {...stroke}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 10h16M10 10v10" /></svg>

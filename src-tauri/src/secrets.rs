@@ -8,9 +8,12 @@ pub const SERVICE: &str = "app.morsel";
 pub const NOTES_KEY: &str = "notes_api_key";
 pub const TRANSCRIBE_KEY: &str = "transcribe_api_key";
 
-/// True for the two accounts that Morsel uses.
+/// Every Keychain account that Morsel uses.
+pub const ACCOUNTS: &[&str] = &[NOTES_KEY, TRANSCRIBE_KEY];
+
+/// True for an account that Morsel uses.
 pub fn is_known_account(account: &str) -> bool {
-    account == NOTES_KEY || account == TRANSCRIBE_KEY
+    ACCOUNTS.contains(&account)
 }
 
 pub trait SecretStore: Send + Sync {

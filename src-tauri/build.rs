@@ -18,6 +18,20 @@ const COMMANDS: &[&str] = &[
     "test_notes_key",
     "model_status",
     "download_model",
+    "search_notes",
+    "list_people",
+    "delete_meeting",
+    "save_template",
+    "duplicate_template",
+    "delete_template",
+    "reset_template",
+    "ask",
+    "list_asks",
+    "get_ask",
+    "usage_summary",
+    "data_info",
+    "export_all",
+    "delete_all_data",
 ];
 
 fn main() {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { markYours } from "../../lib/markYours";
@@ -18,6 +18,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/meeting/:id/writing" element={<WritingScreen />} />
         <Route path="/note/:id" element={<NoteScreen />} />
+        <Route path="/notes" element={<p>notes page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -97,5 +98,16 @@ describe("NoteScreen", () => {
     renderAt("/note/1");
     fireEvent.click(await screen.findByRole("button", { name: "Export as Markdown" }));
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("export_note", { meetingId: 1, path: "/tmp/x.md" }));
+  });
+
+  it("delete_note_asks_then_goes_to_notes", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary\n- ok" };
+    renderAt("/note/1");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete note" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete this note?" });
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "delete_meeting")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete note" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_meeting", { meetingId: 1 }));
+    expect(await screen.findByText("notes page")).toBeInTheDocument();
   });
 });

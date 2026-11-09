@@ -180,7 +180,7 @@ export function MeetingScreen() {
           </div>
         </main>
 
-        {showTranscript && <TranscriptPanel lines={lines} onHide={() => setShowTranscript(false)} />}
+        {showTranscript && <TranscriptPanel meetingId={id} lines={lines} onHide={() => setShowTranscript(false)} />}
       </div>
     </div>
   );

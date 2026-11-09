@@ -1,10 +1,15 @@
-import { useEffect, useRef } from "react";
-import { clock, type TranscriptLine } from "../../lib/api";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { api, clock, errorMessage, type TranscriptLine } from "../../lib/api";
+import { AnswerText } from "../ask/AnswerText";
+import "../library.css";
 
-type Props = { lines: TranscriptLine[]; onHide: () => void };
+type Props = { meetingId: number; lines: TranscriptLine[]; onHide: () => void };
 
 /** The live transcript on the right. It follows the newest line unless the user scrolled up. */
-export function TranscriptPanel({ lines, onHide }: Props) {
+export function TranscriptPanel({ meetingId, lines, onHide }: Props) {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
   const followRef = useRef(true);
 
@@ -16,6 +21,22 @@ export function TranscriptPanel({ lines, onHide }: Props) {
   const onScroll = () => {
     const list = listRef.current;
     if (list) followRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  };
+
+  const ask = async (e: FormEvent) => {
+    e.preventDefault();
+    const q = question.trim();
+    if (!q) return;
+    setAsking(true);
+    try {
+      const result = await api.ask(q, "all", meetingId);
+      setAnswer(result.answer);
+      setQuestion("");
+    } catch (err) {
+      setAnswer(errorMessage(err));
+    } finally {
+      setAsking(false);
+    }
   };
 
   return (
@@ -37,10 +58,15 @@ export function TranscriptPanel({ lines, onHide }: Props) {
           </li>
         ))}
       </ol>
-      <form className="ask-box" onSubmit={(e) => e.preventDefault()}>
+      {(asking || answer) && (
+        <div role="status" className="panel-answer">
+          {asking ? <p className="muted">Reading this meeting…</p> : <AnswerText text={answer ?? ""} />}
+        </div>
+      )}
+      <form className="ask-box" onSubmit={ask}>
         <label htmlFor="ask-meeting" className="sr-only">Ask about this meeting</label>
-        <input id="ask-meeting" type="text" placeholder="Ask about this meeting" disabled title="Coming in a later version" />
-        <button type="submit" className="btn btn-primary" disabled>Ask</button>
+        <input id="ask-meeting" type="text" placeholder="Ask about this meeting" value={question} onChange={(e) => setQuestion(e.target.value)} />
+        <button type="submit" className="btn btn-primary" disabled={!question.trim() || asking}>Ask</button>
       </form>
     </aside>
   );
