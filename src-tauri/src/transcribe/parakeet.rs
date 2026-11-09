@@ -1,7 +1,7 @@
 //! Local transcription with Parakeet TDT 0.6B v3 (int8) through sherpa-onnx.
 
-use super::Transcriber;
 use super::model_download::model_ready;
+use super::Transcriber;
 use crate::audio::PIPELINE_RATE;
 use crate::types::{MorselError, Result};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
@@ -80,8 +80,10 @@ mod tests {
         .unwrap();
         let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
         bytes[data..]
-            .chunks_exact(2)
-            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32_768.0)
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&b| i16::from_le_bytes(b) as f32 / 32_768.0)
             .collect()
     }
 
