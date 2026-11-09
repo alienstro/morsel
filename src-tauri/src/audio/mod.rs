@@ -1,7 +1,8 @@
-//! Audio capture and processing. Audio stays in memory only.
+//! Audio capture, processing and the saved meeting audio.
 
 pub mod level;
 pub mod mic;
+pub mod recording;
 pub mod resample;
 pub mod source;
 pub mod system_tap;
