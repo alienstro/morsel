@@ -13,6 +13,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::{JoinHandle, JoinSet};
 
@@ -38,6 +39,8 @@ struct Shared {
     transcriber: Arc<dyn Transcriber>,
     sink: Arc<dyn EventSink>,
     language: Option<String>,
+    /// One permit: the two streams take turns, so only one transcription uses the CPU at a time.
+    gate: Arc<Semaphore>,
 }
 
 pub struct MeetingSession {
@@ -88,6 +91,7 @@ impl MeetingSession {
             transcriber,
             sink: sink.clone(),
             language,
+            gate: Arc::new(Semaphore::new(1)),
         };
         let paused = Arc::new(AtomicBool::new(false));
         let you_level = Arc::new(AtomicU32::new(0));
@@ -200,6 +204,7 @@ async fn pump(
 
 async fn transcribe_chunk(shared: Shared, chunk: AudioChunk) {
     let end_ms = chunk.start_ms + (chunk.samples.len() as u64 * 1000 / PIPELINE_RATE as u64);
+    let _turn = shared.gate.acquire().await.expect("the gate is never closed");
     let text = match transcribe_with_retry(
         shared.transcriber.as_ref(),
         &chunk.samples,
@@ -335,6 +340,37 @@ mod tests {
             5,
             None,
         )
+    }
+
+    /// Counts the calls that run at the same time.
+    #[derive(Default)]
+    struct CountingTranscriber {
+        now: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Transcriber for CountingTranscriber {
+        async fn transcribe(&self, _samples: &[f32], _l: Option<&str>) -> Result<String> {
+            let running = self.now.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(running, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            self.now.fetch_sub(1, Ordering::SeqCst);
+            Ok("words".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn live_mode_runs_one_transcription_at_a_time() {
+        let (_d, db) = db();
+        let counting = Arc::new(CountingTranscriber::default());
+        let sink = Arc::new(VecSink::default());
+        let ((mic, mic_slot), (sys, sys_slot)) = (source(), source());
+        let (session, id) = start(&db, mic, sys, counting.clone(), sink).unwrap();
+        tokio::join!(send(&mic_slot, speech(35.0)), send(&sys_slot, speech(35.0)));
+        session.stop().await.unwrap();
+        assert_eq!(get_meeting(&db.lock().unwrap(), id).unwrap().lines.len(), 4);
+        assert_eq!(counting.most.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
