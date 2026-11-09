@@ -30,10 +30,32 @@ function renderAt(path: string) {
         <Route path="/settings/models" element={<SettingsModelsScreen />} />
         <Route path="/meeting/:id" element={<p>meeting page</p>} />
         <Route path="/ask" element={<p>ask page</p>} />
+        <Route path="/notes" element={<p>notes page</p>} />
       </Routes>
     </MemoryRouter>,
   );
 }
+
+describe("HomeScreen earlier notes", () => {
+  it("home_groups_notes_by_day", async () => {
+    const at = (daysBack: number, h: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() - daysBack);
+      d.setHours(h, 30, 0, 0);
+      return d.getTime();
+    };
+    const row = (id: number, title: string, startedAt: number) => ({ id, title, templateId: 1, templateName: "General", status: "done", startedAt, endedAt: null, people: [] });
+    responses.list_meetings = [row(1, "Standup", at(0, 9)), row(2, "1:1 with Sam", at(1, 16)), row(3, "Design review", at(1, 11)), row(4, "Old one", at(20, 10))];
+    renderAt("/");
+    const today = await screen.findByRole("heading", { name: "Today" });
+    expect(today).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+    expect(screen.getByText("16:30")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "View all" }));
+    expect(await screen.findByText("notes page")).toBeInTheDocument();
+  });
+});
 
 describe("HomeScreen ask box", () => {
   it("home_cmd_k_focuses_ask_box", async () => {

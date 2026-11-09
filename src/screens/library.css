@@ -61,3 +61,12 @@
 .panel-answer p { margin: 0 0 6px; }
 .home-ask { display: flex; align-items: center; gap: 6px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 9px; padding: 3px 8px 3px 10px; }
 .home-ask input { flex-grow: 1; min-width: 0; height: 28px; border: 0; outline: none; background: transparent; font: 400 13px var(--font-ui); color: var(--text); }
+.settings-rows { display: flex; flex-direction: column; border-top: 1px solid var(--border); max-width: 600px; }
+.settings-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.settings-row .grow { flex-grow: 1; min-width: 0; }
+.block { display: block; }
+.nav-count { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.day-group { margin: 12px 0 2px; font-size: 11px; font-weight: 500; color: var(--muted); }
+.section-head { display: flex; align-items: baseline; gap: 8px; }
+.section-head h2 { flex-grow: 1; }
+.section-head a { font-size: 12px; color: var(--muted); }

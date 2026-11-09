@@ -34,4 +34,11 @@ describe("AppShell", () => {
     renderAt("/");
     expect(screen.getByRole("button", { name: "New note" })).toBeInTheDocument();
   });
+
+  it("sidebar_shows_note_count", () => {
+    render(<MemoryRouter><AppShell noteCount={48}><p>x</p></AppShell></MemoryRouter>);
+    const link = screen.getByRole("link", { name: /Notes/ });
+    expect(link).toHaveTextContent("48");
+    expect(link).toHaveAccessibleName("Notes, 48 notes");
+  });
 });

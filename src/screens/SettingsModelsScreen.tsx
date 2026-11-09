@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, onModelDownload, type KeyAccount, type Settings } from "../lib/api";
+import { api, errorMessage, onModelDownload, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
 import "./note/note.css";
 
 type KeyFieldProps = { account: KeyAccount; label: string };
@@ -39,6 +39,13 @@ function KeyField({ account, label }: KeyFieldProps) {
   );
 }
 
+/** "Usage, last 30 days: 1,500 tokens", with ", $0.04" only when a provider returned a cost. */
+function usageText(u: UsageTotal): string {
+  const tokens = (u.promptTokens + u.completionTokens).toLocaleString("en-US");
+  const cost = u.cost === null ? "" : `, $${u.cost.toFixed(2)}`;
+  return `Usage, last 30 days: ${tokens} tokens${cost}`;
+}
+
 export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -46,8 +53,10 @@ export function SettingsModelsScreen() {
   const [modelReady, setModelReady] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
+    api.usageSummary().then(setUsage).catch(() => {});
     api.getSettings().then(setSettings).catch((e) => setMessage(errorMessage(e)));
     api.modelStatus().then(setModelReady).catch(() => {});
     const off = onModelDownload(({ received, total }) => total > 0 && setProgress(Math.floor((received / total) * 100)));
@@ -116,10 +125,11 @@ export function SettingsModelsScreen() {
           <button type="button" className="btn" onClick={testKey}>Test key</button>
           {keyMessage && <span className="small">{keyMessage}</span>}
         </div>
+        {usage && <p className="muted small" style={{ margin: 0 }}>{usageText(usage)}</p>}
       </section>
 
-      <section aria-labelledby="transcription" className="settings-section">
-        <h2 id="transcription" className="section-title">Transcription</h2>
+      <section id="transcription" aria-labelledby="transcription-title" className="settings-section">
+        <h2 id="transcription-title" className="section-title">Transcription</h2>
         <fieldset className="row">
           <legend className="sr-only">Transcription mode</legend>
           <label><input type="radio" name="mode" checked={settings.transcribeMode === "local"} onChange={() => set("transcribeMode", "local")} /> On this Mac (free, private)</label>
