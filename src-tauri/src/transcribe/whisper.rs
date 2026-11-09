@@ -1,6 +1,6 @@
 //! Local transcription with Whisper Turbo (int8) through sherpa-onnx.
 //! Whisper knows most languages, Tagalog too, and it reads at most 30 s of audio for each
-//! call. The chunker never makes a chunk longer than 30 s.
+//! call. The chunker never makes a chunk longer than 28 s.
 
 use super::model_download::model_ready;
 use super::{Transcriber, language_param};
