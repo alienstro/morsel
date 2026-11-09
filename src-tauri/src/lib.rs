@@ -6,6 +6,7 @@ pub mod db;
 pub mod events;
 pub mod llm;
 pub mod notes;
+pub mod permissions;
 pub mod secrets;
 pub mod session;
 pub mod settings;
@@ -67,6 +68,9 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::data_info,
             commands::export_all,
             commands::delete_all_data,
+            permissions::microphone_access,
+            permissions::request_microphone,
+            permissions::open_privacy_settings,
         ])
 }
 

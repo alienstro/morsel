@@ -40,6 +40,9 @@
     "allow-data-info",
     "allow-export-all",
     "allow-delete-all-data",
+    "allow-microphone-access",
+    "allow-request-microphone",
+    "allow-open-privacy-settings",
     "dialog:allow-open",
     "opener:allow-reveal-item-in-dir"
   ]

@@ -32,6 +32,9 @@ const COMMANDS: &[&str] = &[
     "data_info",
     "export_all",
     "delete_all_data",
+    "microphone_access",
+    "request_microphone",
+    "open_privacy_settings",
 ];
 
 fn main() {
