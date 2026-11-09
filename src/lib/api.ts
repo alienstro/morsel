@@ -51,7 +51,8 @@ export const api = {
     invoke<number>("start_meeting", { title, templateId, people }),
   pauseMeeting: () => invoke<void>("pause_meeting"),
   resumeMeeting: () => invoke<void>("resume_meeting"),
-  stopMeeting: () => invoke<void>("stop_meeting"),
+  /** Returns the timing of the meeting. In "after" mode, Morsel writes the notes by itself. */
+  stopMeeting: () => invoke<Settings["transcribeTiming"]>("stop_meeting"),
   saveUserNotes: (meetingId: number, body: string) => invoke<void>("save_user_notes", { meetingId, body }),
   writeNotes: (meetingId: number, templateId: number) => invoke<void>("write_notes", { meetingId, templateId }),
   cancelNotes: (meetingId: number) => invoke<boolean>("cancel_notes", { meetingId }),
@@ -107,6 +108,8 @@ export const onNotesDone = (h: (e: { meetingId: number }) => void) => on("notes:
 export const onNotesFailed = (h: (e: { meetingId: number; message: string }) => void) => on("notes://failed", h);
 export const onOpenMeeting = (h: (e: { id: number }) => void) => on("app://open-meeting", h);
 export const onCalendarChanged = (h: () => void) => on("calendar://changed", h);
+export const onTranscribeProgress = (h: (e: { meetingId: number; doneMs: number; totalMs: number }) => void) =>
+  on("transcribe://progress", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
 
 /** The text to show for any error from a command. */

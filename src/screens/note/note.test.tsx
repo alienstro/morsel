@@ -59,6 +59,18 @@ describe("WritingScreen", () => {
     expect(await screen.findByText(/ask Priya/)).toBeInTheDocument();
   });
 
+  it("writing_page_shows_transcribing_progress", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "transcribing" }, lines: [], userNotes: "", note: null };
+    renderAt("/meeting/1/writing");
+    expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
+    act(() => emit("transcribe://progress", { meetingId: 2, doneMs: 1, totalMs: 2 }));
+    act(() => emit("transcribe://progress", { meetingId: 1, doneMs: 12 * 60_000, totalMs: 60 * 60_000 }));
+    expect(await screen.findByText("Transcribing: 12 of 60 min")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel and keep my notes" })).not.toBeInTheDocument();
+    act(() => emit("meeting://status", { meetingId: 1, status: "writing_notes", warning: null }));
+    expect(await screen.findByText("Morsel is writing the notes…")).toBeInTheDocument();
+  });
+
   it("notes_failed_shows_message_and_try_again", async () => {
     renderAt("/meeting/1/writing");
     await screen.findByRole("button", { name: "Cancel and keep my notes" });

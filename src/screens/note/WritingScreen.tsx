@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, errorMessage, onNotesDone, onNotesFailed, onStatus, type MeetingDetail } from "../../lib/api";
+import { api, errorMessage, onNotesDone, onNotesFailed, onStatus, onTranscribeProgress, type MeetingDetail } from "../../lib/api";
 import "./note.css";
 
-type Phase = "writing" | "failed" | "cancelled";
+type Phase = "transcribing" | "writing" | "failed" | "cancelled";
+type Progress = { doneMs: number; totalMs: number };
+
+const MINUTE_MS = 60_000;
+
+/** "Transcribing: 12 of 60 min", or a short text before the first progress event. */
+function transcribingText(progress: Progress | null): string {
+  if (!progress || progress.totalMs <= 0) return "Transcribing the audio…";
+  const done = Math.floor(progress.doneMs / MINUTE_MS);
+  const total = Math.max(1, Math.ceil(progress.totalMs / MINUTE_MS));
+  return `Transcribing: ${done} of ${total} min`;
+}
 
 export function WritingScreen() {
   const id = Number(useParams().id);
@@ -11,6 +22,7 @@ export function WritingScreen() {
   const [detail, setDetail] = useState<MeetingDetail | null>(null);
   const [phase, setPhase] = useState<Phase>("writing");
   const [message, setMessage] = useState("");
+  const [progress, setProgress] = useState<Progress | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -20,6 +32,7 @@ export function WritingScreen() {
       if (d.summary.status === "done") navigate(`/note/${id}`, { replace: true });
       if (d.summary.status === "notes_failed") setPhase("failed");
       if (d.summary.status === "notes_cancelled") setPhase("cancelled");
+      if (d.summary.status === "transcribing") setPhase("transcribing");
     }).catch((e) => setMessage(errorMessage(e)));
     const unlisten = [
       onNotesDone((e) => e.meetingId === id && navigate(`/note/${id}`, { replace: true })),
@@ -28,7 +41,12 @@ export function WritingScreen() {
         setMessage(e.message);
         setPhase("failed");
       }),
-      onStatus((e) => e.meetingId === id && e.status === "notes_cancelled" && setPhase("cancelled")),
+      onStatus((e) => {
+        if (e.meetingId !== id) return;
+        if (e.status === "notes_cancelled") setPhase("cancelled");
+        if (e.status === "writing_notes") setPhase("writing");
+      }),
+      onTranscribeProgress((e) => e.meetingId === id && setProgress({ doneMs: e.doneMs, totalMs: e.totalMs })),
     ];
     return () => {
       alive = false;
@@ -50,6 +68,13 @@ export function WritingScreen() {
   return (
     <div className="page">
       <h1 className="serif page-title">{detail?.summary.title ?? "Writing notes"}</h1>
+      {phase === "transcribing" && (
+        <ol className="steps">
+          <li>Your rough notes are saved.</li>
+          <li aria-busy="true"><strong>{transcribingText(progress)}</strong></li>
+          <li>Morsel writes the notes.</li>
+        </ol>
+      )}
       {phase === "writing" && (
         <>
           <ol className="steps">
