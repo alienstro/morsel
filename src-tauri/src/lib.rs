@@ -1,5 +1,6 @@
 pub mod ask;
 pub mod audio;
+pub mod calendar;
 pub mod chunker;
 pub mod commands;
 pub mod db;
