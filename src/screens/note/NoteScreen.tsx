@@ -57,12 +57,17 @@ export function NoteScreen() {
 
   useEffect(() => {
     api.getMeeting(id).then((d) => {
+      // The after job still transcribes this meeting: the writing page shows its progress.
+      if (d.summary.status === "transcribing") {
+        navigate(`/meeting/${id}/writing`, { replace: true });
+        return;
+      }
       setDetail(d);
       setTemplateId(d.summary.templateId);
     }).catch((e) => setInfo(errorMessage(e)));
     api.listTemplates().then(setTemplates).catch(() => {});
     api.audioSize(id).then(setAudioBytes).catch(() => {});
-  }, [id]);
+  }, [id, navigate]);
 
   const deleteAudio = async () => {
     setConfirmingAudio(false);

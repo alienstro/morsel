@@ -136,6 +136,13 @@ describe("NoteScreen", () => {
     expect(screen.getByText("The audio is deleted. The notes and the transcript stay.")).toBeInTheDocument();
   });
 
+  it("note_page_opens_the_writing_page_while_the_audio_is_transcribed", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "transcribing" }, lines: [], userNotes: "", note: null };
+    renderAt("/note/1");
+    expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
+  });
+
   it("note_page_has_no_audio_button_without_audio", async () => {
     responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
     responses.audio_size = null;
