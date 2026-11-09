@@ -18,8 +18,8 @@
 .dialog h2 { margin: 0; font: 400 20px var(--font-serif); }
 .dialog p { margin: 0; color: var(--muted); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.btn-danger { border-color: var(--recording); color: var(--recording); }
-.btn-danger-fill { background: var(--recording); border-color: var(--recording); color: var(--surface); }
+.btn.btn-danger { border-color: var(--recording); color: var(--recording); }
+.btn.btn-danger-fill { background: var(--recording); border-color: var(--recording); color: var(--surface); }
 .tpl-layout { display: flex; flex-wrap: wrap; min-height: 100%; }
 .tpl-list { flex: 1 0 220px; max-width: 260px; padding: 20px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .tpl-list-head { display: flex; align-items: center; padding: 0 6px; }
@@ -70,3 +70,6 @@
 .section-head { display: flex; align-items: baseline; gap: 8px; }
 .section-head h2 { flex-grow: 1; }
 .section-head a { font-size: 12px; color: var(--muted); }
+.icon-btn-light { flex-shrink: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text); cursor: pointer; }
+.icon-btn-light:hover:not(:disabled) { background: var(--bg); }
+.icon-btn-light:disabled { opacity: 0.35; cursor: default; }

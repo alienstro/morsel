@@ -109,7 +109,7 @@ export function TemplatesScreen() {
       <section aria-labelledby="tpl-title" className="tpl-list">
         <div className="tpl-list-head">
           <h1 id="tpl-title">Templates</h1>
-          <button type="button" className="icon-btn" aria-label="New template" onClick={startNew}>
+          <button type="button" className="icon-btn-light" aria-label="New template" onClick={startNew}>
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" {...stroke}><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
@@ -137,13 +137,13 @@ export function TemplatesScreen() {
             <div key={i} className="section-row">
               <input aria-label={`Section ${i + 1} name`} className="tpl-input" placeholder="Section name" value={s.name} onChange={(e) => setSection(i, { name: e.target.value })} />
               <input aria-label={`Section ${i + 1} hint`} className="tpl-input" placeholder="What it holds (optional)" value={s.hint} onChange={(e) => setSection(i, { hint: e.target.value })} />
-              <button type="button" className="icon-btn" aria-label={`Move ${s.name || `section ${i + 1}`} up`} disabled={i === 0} onClick={() => moveSection(i, -1)}>
+              <button type="button" className="icon-btn-light" aria-label={`Move ${s.name || `section ${i + 1}`} up`} disabled={i === 0} onClick={() => moveSection(i, -1)}>
                 <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" {...stroke}><path d="M6 15l6-6 6 6" /></svg>
               </button>
-              <button type="button" className="icon-btn" aria-label={`Move ${s.name || `section ${i + 1}`} down`} disabled={i === form.sections.length - 1} onClick={() => moveSection(i, 1)}>
+              <button type="button" className="icon-btn-light" aria-label={`Move ${s.name || `section ${i + 1}`} down`} disabled={i === form.sections.length - 1} onClick={() => moveSection(i, 1)}>
                 <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" {...stroke}><path d="M6 9l6 6 6-6" /></svg>
               </button>
-              <button type="button" className="icon-btn" aria-label={`Remove ${s.name || `section ${i + 1}`}`} disabled={form.sections.length === 1} onClick={() => removeSection(i)}>
+              <button type="button" className="icon-btn-light" aria-label={`Remove ${s.name || `section ${i + 1}`}`} disabled={form.sections.length === 1} onClick={() => removeSection(i)}>
                 <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" {...stroke}><path d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
             </div>
