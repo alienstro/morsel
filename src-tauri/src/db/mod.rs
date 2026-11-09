@@ -1,5 +1,6 @@
 //! The SQLite database of Morsel: one file in the app data folder.
 
+pub mod library;
 pub mod meetings;
 
 #[cfg(test)]
@@ -15,7 +16,10 @@ use std::sync::{Arc, Mutex};
 pub type SharedDb = Arc<Mutex<Connection>>;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MIGRATIONS: &[M<'static>] = &[M::up(include_str!("migrations.sql"))];
+pub(crate) const MIGRATIONS: &[M<'static>] = &[
+    M::up(include_str!("migrations.sql")),
+    M::up(include_str!("migrations_2.sql")),
+];
 
 /// Opens the database, turns on WAL and foreign keys, and runs the migrations.
 pub fn open(path: &Path) -> Result<Connection> {
