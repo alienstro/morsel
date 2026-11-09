@@ -1,6 +1,6 @@
 use super::meetings::*;
-use super::templates;
 use super::open;
+use super::templates;
 use crate::types::{MeetingStatus, Speaker, TranscriptLine};
 use rusqlite::Connection;
 
@@ -46,7 +46,10 @@ fn seeds_five_templates() {
     );
     let general = templates::get(&conn, 1).unwrap();
     let sections: Vec<&str> = general.sections.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(sections, ["Summary", "Key points", "Decisions", "Action items"]);
+    assert_eq!(
+        sections,
+        ["Summary", "Key points", "Decisions", "Action items"]
+    );
 }
 
 #[test]

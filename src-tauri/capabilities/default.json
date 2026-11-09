@@ -25,6 +25,22 @@
     "allow-write-notes",
     "allow-cancel-notes",
     "allow-export-note",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "allow-search-notes",
+    "allow-list-people",
+    "allow-delete-meeting",
+    "allow-save-template",
+    "allow-duplicate-template",
+    "allow-delete-template",
+    "allow-reset-template",
+    "allow-ask",
+    "allow-list-asks",
+    "allow-get-ask",
+    "allow-usage-summary",
+    "allow-data-info",
+    "allow-export-all",
+    "allow-delete-all-data",
+    "dialog:allow-open",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

@@ -33,6 +33,7 @@ impl<R: Runtime> EventSink for TauriSink<R> {
 pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_meeting,
             commands::pause_meeting,
@@ -52,6 +53,20 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::test_notes_key,
             commands::model_status,
             commands::download_model,
+            commands::search_notes,
+            commands::list_people,
+            commands::delete_meeting,
+            commands::save_template,
+            commands::duplicate_template,
+            commands::delete_template,
+            commands::reset_template,
+            commands::ask,
+            commands::list_asks,
+            commands::get_ask,
+            commands::usage_summary,
+            commands::data_info,
+            commands::export_all,
+            commands::delete_all_data,
         ])
 }
 
@@ -73,7 +88,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         secrets.clone(),
     ));
     let sink = Arc::new(TauriSink(app.handle().clone()));
-    app.manage(AppState::new(db, secrets, http, sink, engines, model_dir));
+    app.manage(AppState::new(
+        db, secrets, http, sink, engines, data_dir, model_dir,
+    ));
     Ok(())
 }
 

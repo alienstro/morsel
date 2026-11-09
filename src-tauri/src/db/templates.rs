@@ -374,7 +374,10 @@ mod tests {
             name: " ".into(),
             ..input("x")
         };
-        assert!(matches!(create(&conn, &empty), Err(MorselError::Invalid(_))));
+        assert!(matches!(
+            create(&conn, &empty),
+            Err(MorselError::Invalid(_))
+        ));
         let no_sections = TemplateInput {
             sections: vec![section("  ", "")],
             ..input("x")
@@ -420,7 +423,10 @@ mod tests {
         let (_d, conn) = temp_db();
         let before = get(&conn, 5).unwrap();
         assert_eq!(before.name, "Product sync");
-        assert_eq!(before.sections[2], section("Risks", "What can delay the plan"));
+        assert_eq!(
+            before.sections[2],
+            section("Risks", "What can delay the plan")
+        );
         update(&conn, 5, &input("Changed")).unwrap();
         reset(&conn, 5).unwrap();
         assert_eq!(get(&conn, 5).unwrap(), before);
@@ -446,6 +452,9 @@ mod tests {
         )
         .unwrap();
         let t = get(&conn, 1).unwrap();
-        assert_eq!(t.sections, vec![section("Summary", ""), section("Next steps", "")]);
+        assert_eq!(
+            t.sections,
+            vec![section("Summary", ""), section("Next steps", "")]
+        );
     }
 }

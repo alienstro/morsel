@@ -94,7 +94,11 @@ fn cut(text: &str, max_chars: usize) -> &str {
 }
 
 /// One meeting as context text, inside its share of the token budget.
-fn meeting_block(conn: &Connection, id: MeetingId, max_chars: usize) -> Result<(AskSource, String)> {
+fn meeting_block(
+    conn: &Connection,
+    id: MeetingId,
+    max_chars: usize,
+) -> Result<(AskSource, String)> {
     let detail = get_meeting(conn, id)?;
     let date: String = conn.query_row(
         "SELECT date(?1 / 1000, 'unixepoch')",
@@ -244,7 +248,11 @@ mod tests {
         let conn = db.lock().unwrap();
         let found = find_meetings(&conn, "What about the discount?", AskRange::All, now).unwrap();
         assert_eq!(found, vec![pricing]);
-        assert!(find_meetings(&conn, "?? **", AskRange::All, now).unwrap().is_empty());
+        assert!(
+            find_meetings(&conn, "?? **", AskRange::All, now)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -295,7 +303,8 @@ mod tests {
         assert_eq!(answer.sources.len(), 1);
         assert_eq!(answer.sources[0].meeting_id, pricing);
         assert_eq!(answer.sources[0].title, "Pricing call");
-        let body = String::from_utf8(server.received_requests().await.unwrap()[0].body.clone()).unwrap();
+        let body =
+            String::from_utf8(server.received_requests().await.unwrap()[0].body.clone()).unwrap();
         assert!(body.contains("Pricing call"));
         assert!(!body.contains("Roadmap"));
 
@@ -369,7 +378,11 @@ mod tests {
         .await
         .unwrap();
         let body = &server.received_requests().await.unwrap()[0].body;
-        assert!(body.len() / 4 < ASK_TOKENS + 2_000, "body is {} bytes", body.len());
+        assert!(
+            body.len() / 4 < ASK_TOKENS + 2_000,
+            "body is {} bytes",
+            body.len()
+        );
     }
 
     #[tokio::test]
@@ -396,7 +409,8 @@ mod tests {
         assert_eq!(answer.sources.len(), 1);
         assert_eq!(answer.sources[0].meeting_id, id);
         assert!(list_asks(&db.lock().unwrap(), 10).unwrap().is_empty());
-        let body = String::from_utf8(server.received_requests().await.unwrap()[0].body.clone()).unwrap();
+        let body =
+            String::from_utf8(server.received_requests().await.unwrap()[0].body.clone()).unwrap();
         assert!(!body.contains("Leo is fine"));
     }
 }

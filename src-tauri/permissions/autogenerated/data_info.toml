@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-data-info"
+description = "Enables the data_info command without any pre-configured scope."
+commands.allow = ["data_info"]
+
+[[permission]]
+identifier = "deny-data-info"
+description = "Denies the data_info command without any pre-configured scope."
+commands.deny = ["data_info"]

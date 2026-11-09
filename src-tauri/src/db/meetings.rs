@@ -31,8 +31,7 @@ pub struct MeetingDetail {
 /// The title of a meeting that the user did not name.
 pub const UNTITLED: &str = "Untitled meeting";
 
-pub(crate) const SUMMARY_SQL: &str =
-    "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at, m.ended_at, m.people \
+pub(crate) const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at, m.ended_at, m.people \
      FROM meetings m JOIN templates t ON t.id = m.template_id";
 
 /// The raw columns of `SUMMARY_SQL`, before the status and the people are parsed.

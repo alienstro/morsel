@@ -5,9 +5,7 @@ use super::prompt::{
     clean_title, estimate_tokens, split_lines, summary_messages, title_messages, transcript_text,
 };
 use crate::db::SharedDb;
-use crate::db::meetings::{
-    UNTITLED, get_meeting, record_usage, save_note, set_status, set_title,
-};
+use crate::db::meetings::{UNTITLED, get_meeting, record_usage, save_note, set_status, set_title};
 use crate::db::templates;
 use crate::events::{EventSink, NOTES_DONE, NOTES_FAILED, STATUS};
 use crate::llm::{ChatMessage, LlmConfig, chat};

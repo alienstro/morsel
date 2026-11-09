@@ -1,9 +1,9 @@
 //! Library queries: the search index, the notes list, people, delete, usage and saved questions.
 
 use super::meetings::{MeetingSummary, SUMMARY_SQL, summary_from_row, to_summary};
+use crate::ask::AskAnswer;
 use crate::types::{MeetingId, MorselError, Result};
 use rusqlite::types::Value;
-use crate::ask::AskAnswer;
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::{Deserialize, Serialize};
 
@@ -424,7 +424,8 @@ mod tests {
         let (_d, conn) = temp_db();
         record_usage(&conn, "m", 100, 20, None).unwrap();
         record_usage(&conn, "m", 50, 5, None).unwrap();
-        conn.execute("UPDATE usage SET at = 1 WHERE id = 1", []).unwrap();
+        conn.execute("UPDATE usage SET at = 1 WHERE id = 1", [])
+            .unwrap();
         let recent = usage_since(&conn, 10).unwrap();
         assert_eq!(
             recent,
