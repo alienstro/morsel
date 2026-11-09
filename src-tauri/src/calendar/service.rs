@@ -196,6 +196,11 @@ impl CalendarService {
         let started = api
             .link(&auth_config_id, &link.user_id, CALLBACK_URL)
             .await?;
+        if !started.redirect_url.starts_with("https://") {
+            return Err(MorselError::Http(
+                "Composio sent a sign-in page that is not https.".into(),
+            ));
+        }
         *link.slot(provider) = Some(ProviderLink {
             auth_config_id,
             account_id: started.connected_account_id,
@@ -288,6 +293,16 @@ impl CalendarService {
             .map_err(|_| MorselError::Db("lock".into()))? = events;
         self.changed();
         Ok(())
+    }
+
+    /// One poll: activates the finished sign-ins, then reads the events. Errors go to the log.
+    pub async fn poll_once(&self, now_ms: i64) {
+        if let Err(err) = self.check_pending().await {
+            eprintln!("cannot check the calendar link: {err}");
+        }
+        if let Err(err) = self.refresh(now_ms).await {
+            eprintln!("cannot read the calendars: {err}");
+        }
     }
 
     /// The cached events of the calendars that are still connected.
@@ -474,6 +489,45 @@ mod tests {
             })
         );
         assert_eq!(link.outlook, None);
+    }
+
+    #[tokio::test]
+    async fn connect_refuses_a_sign_in_page_that_is_not_https() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth_configs"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(json!({ "auth_config": { "id": "ac_g" } })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/connected_accounts/link"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "redirect_url": "file:///Applications/Calculator.app", "connected_account_id": "ca_g"
+            })))
+            .mount(&server)
+            .await;
+        let (_d, s, _) = service(&server);
+        assert!(s.connect(Provider::Google, NOW).await.is_err());
+        assert_eq!(s.link().unwrap().google, None);
+    }
+
+    #[tokio::test]
+    async fn poll_activates_a_pending_connection() {
+        let server = MockServer::start().await;
+        mock_connect(&server).await;
+        mock_events(
+            &server,
+            json!([{ "id": "e1", "start": { "dateTime": rfc(NOW + 60_000) } }]),
+        )
+        .await;
+        let (_d, s, _) = service(&server);
+        s.connect(Provider::Google, NOW).await.unwrap();
+        s.poll_once(NOW).await;
+        assert!(s.link().unwrap().google.unwrap().active);
+        assert_eq!(s.events().unwrap().len(), 1);
     }
 
     #[tokio::test]

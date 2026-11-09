@@ -139,10 +139,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             show_main(&handle);
             let cal = calendar.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = cal.check_pending().await {
-                    eprintln!("cannot check the calendar link: {err}");
-                }
-                let _ = cal.refresh(chrono::Utc::now().timestamp_millis()).await;
+                cal.poll_once(chrono::Utc::now().timestamp_millis()).await;
             });
         }
     });
@@ -153,12 +150,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 fn start_calendar_poll(calendar: Arc<CalendarService>) {
     tauri::async_runtime::spawn(async move {
         loop {
-            if let Err(err) = calendar
-                .refresh(chrono::Utc::now().timestamp_millis())
-                .await
-            {
-                eprintln!("cannot read the calendars: {err}");
-            }
+            calendar
+                .poll_once(chrono::Utc::now().timestamp_millis())
+                .await;
             tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
         }
     });
