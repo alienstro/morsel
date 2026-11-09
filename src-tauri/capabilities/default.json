@@ -50,6 +50,8 @@
     "allow-upcoming-events",
     "allow-set-global-shortcut",
     "dialog:allow-open",
+    "updater:default",
+    "process:allow-restart",
     "opener:allow-reveal-item-in-dir"
   ]
 }

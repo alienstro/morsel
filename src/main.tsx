@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { windowLabel } from "./lib/window";
 import { ReminderApp } from "./reminder/ReminderApp";
+import "./styles/fonts";
 import "./styles/tokens.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
