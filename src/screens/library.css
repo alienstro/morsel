@@ -1,0 +1,22 @@
+.lib-page { display: flex; flex-direction: column; gap: 14px; padding: 24px 28px; min-height: 100%; }
+.lib-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lib-title { margin: 0; flex-grow: 1; font: 400 24px var(--font-serif); }
+.search-box { position: relative; display: flex; align-items: center; gap: 6px; width: 260px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.search-box input { flex-grow: 1; min-width: 0; border: 0; outline: none; background: transparent; font: 400 13px var(--font-ui); color: var(--text); }
+.lib-select { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font: 400 13px var(--font-ui); color: var(--text); }
+.table-wrap { overflow-x: auto; }
+.notes-table { width: 100%; min-width: 640px; border-collapse: collapse; }
+.notes-table th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.notes-table td { padding: 0 8px; height: 34px; border-bottom: 1px solid #e6e8e1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+.notes-table td:first-child { color: var(--text); }
+.notes-table td:first-child a { font-weight: 500; text-decoration: none; color: inherit; }
+.notes-table td:first-child a:hover { color: var(--muted); }
+.notes-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.lib-foot { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+.dialog-backdrop { position: fixed; inset: 0; background: rgb(34 38 31 / 0.32); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.dialog { width: min(420px, calc(100% - 32px)); background: var(--surface); border-radius: var(--radius-card); padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.18); }
+.dialog h2 { margin: 0; font: 400 20px var(--font-serif); }
+.dialog p { margin: 0; color: var(--muted); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-danger { border-color: var(--recording); color: var(--recording); }
+.btn-danger-fill { background: var(--recording); border-color: var(--recording); color: var(--surface); }

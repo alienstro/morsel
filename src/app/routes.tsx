@@ -6,6 +6,7 @@ import { HomeScreen } from "../screens/HomeScreen";
 import { NoteScreen } from "../screens/note/NoteScreen";
 import { SettingsModelsScreen } from "../screens/SettingsModelsScreen";
 import { WritingScreen } from "../screens/note/WritingScreen";
+import { NotesScreen } from "../screens/notes/NotesScreen";
 import { AppShell, type RecentItem } from "./AppShell";
 
 function ComingSoon() {
@@ -37,6 +38,7 @@ export function AppRoutes() {
         <Route path="/" element={<HomeScreen />} />
         <Route path="/meeting/:id/writing" element={<WritingScreen />} />
         <Route path="/note/:id" element={<NoteScreen />} />
+        <Route path="/notes" element={<NotesScreen />} />
         <Route path="/settings/models" element={<SettingsModelsScreen />} />
         <Route path="*" element={<ComingSoon />} />
       </Route>
