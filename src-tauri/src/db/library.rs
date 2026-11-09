@@ -472,4 +472,21 @@ mod tests {
         assert_eq!(ids(&page), vec![7]);
         assert!(page.items[0].people.is_empty());
     }
+
+    #[test]
+    fn interrupted_meetings_are_searchable() {
+        let (_d, conn) = temp_db();
+        let id = create_meeting(&conn, "Crashed", 1).unwrap();
+        add_line(&conn, &line(id, 0, "the zeppelin budget")).unwrap();
+        assert_eq!(mark_open_meetings_interrupted(&conn).unwrap(), 1);
+        let page = search_meetings(
+            &conn,
+            &NotesFilter {
+                query: Some("zeppelin".into()),
+                ..filter()
+            },
+        )
+        .unwrap();
+        assert_eq!(ids(&page), vec![id]);
+    }
 }

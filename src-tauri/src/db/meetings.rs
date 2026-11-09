@@ -207,17 +207,23 @@ pub fn list_meetings(conn: &Connection, limit: u32) -> Result<Vec<MeetingSummary
     raws.into_iter().map(to_summary).collect()
 }
 
-/// Marks meetings that were recording or paused when the app stopped. Returns the count.
+/// Marks meetings that were recording or paused when the app stopped, and indexes their
+/// transcript for search (lines are not indexed while a meeting records). Returns the count.
 pub fn mark_open_meetings_interrupted(conn: &Connection) -> Result<u32> {
-    let changed = conn.execute(
-        "UPDATE meetings SET status = ?1 WHERE status IN (?2, ?3)",
-        params![
-            MeetingStatus::Interrupted.as_str(),
-            MeetingStatus::Recording.as_str(),
-            MeetingStatus::Paused.as_str()
-        ],
-    )?;
-    Ok(changed as u32)
+    let open: Vec<MeetingId> = conn
+        .prepare("SELECT id FROM meetings WHERE status IN (?1, ?2)")?
+        .query_map(
+            params![
+                MeetingStatus::Recording.as_str(),
+                MeetingStatus::Paused.as_str()
+            ],
+            |r| r.get(0),
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    for id in &open {
+        set_status(conn, *id, MeetingStatus::Interrupted)?;
+    }
+    Ok(open.len() as u32)
 }
 
 /// Saves the token counts of one model request.
