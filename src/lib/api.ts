@@ -91,6 +91,7 @@ export const api = {
   reminderEvent: () => invoke<CalendarEvent | null>("reminder_event"),
   startFromReminder: () => invoke<number>("start_from_reminder"),
   dismissReminder: () => invoke<void>("dismiss_reminder"),
+  setGlobalShortcut: (shortcut: string) => invoke<void>("set_global_shortcut", { shortcut }),
 };
 
 function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {

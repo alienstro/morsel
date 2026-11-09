@@ -43,6 +43,7 @@ const COMMANDS: &[&str] = &[
     "reminder_event",
     "start_from_reminder",
     "dismiss_reminder",
+    "set_global_shortcut",
 ];
 
 fn main() {

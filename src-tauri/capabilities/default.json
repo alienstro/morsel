@@ -48,6 +48,7 @@
     "allow-disconnect-calendar",
     "allow-refresh-calendar",
     "allow-upcoming-events",
+    "allow-set-global-shortcut",
     "dialog:allow-open",
     "opener:allow-reveal-item-in-dir"
   ]

@@ -11,6 +11,7 @@ pub mod permissions;
 pub mod secrets;
 pub mod session;
 pub mod settings;
+pub mod shortcut;
 pub mod transcribe;
 pub mod types;
 
@@ -39,6 +40,11 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| shortcut::on_shortcut(app, event.state()))
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             commands::start_meeting,
             commands::pause_meeting,
@@ -83,6 +89,7 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             calendar::reminder::reminder_event,
             calendar::reminder::start_from_reminder,
             calendar::reminder::dismiss_reminder,
+            shortcut::set_global_shortcut,
         ])
 }
 
@@ -117,6 +124,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     ));
     start_calendar_poll(calendar.clone());
     app.manage(calendar::reminder::ReminderState::default());
+    let saved_shortcut = app.state::<AppState>().settings()?.global_shortcut;
+    if let Err(err) = shortcut::register(app.handle(), &saved_shortcut) {
+        eprintln!("cannot register the global shortcut {saved_shortcut}: {err}");
+    }
     calendar::reminder::start_reminder_loop(app.handle().clone());
     let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {

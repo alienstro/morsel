@@ -32,13 +32,3 @@ export function SettingsLayout() {
     </div>
   );
 }
-
-/** A settings page that a later part of the app fills. */
-export function SettingsPending({ title }: { title: string }) {
-  return (
-    <div className="page">
-      <h1 className="serif page-title">{title}</h1>
-      <p className="muted">This setting comes with the calendar setup.</p>
-    </div>
-  );
-}

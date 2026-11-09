@@ -215,6 +215,11 @@ impl AppState {
         Ok(id)
     }
 
+    /// The id of the meeting that records now.
+    pub async fn recording_meeting(&self) -> Option<MeetingId> {
+        self.session.lock().await.as_ref().map(|s| s.id())
+    }
+
     pub async fn pause_meeting(&self) -> Result<()> {
         self.session
             .lock()
@@ -959,6 +964,16 @@ mod tests {
         assert_eq!(all[1].name, "1:1");
         assert!(all.iter().all(|t| t.id != custom));
         assert_eq!(s.data_info().unwrap().notes, 0);
+    }
+
+    #[tokio::test]
+    async fn recording_meeting_is_the_live_one() {
+        let (_d, s) = state();
+        assert_eq!(s.recording_meeting().await, None);
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert_eq!(s.recording_meeting().await, Some(id));
+        s.stop_meeting().await.unwrap();
+        assert_eq!(s.recording_meeting().await, None);
     }
 
     #[tokio::test]
