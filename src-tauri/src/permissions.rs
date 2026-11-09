@@ -103,6 +103,29 @@ pub async fn request_microphone() -> MicAccess {
     ask_for_mic().await
 }
 
+/// How long the system audio probe records. macOS shows its prompt while the tap runs.
+const SYSTEM_AUDIO_PROBE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Records system audio for a moment and drops the sound. macOS has no call that asks for
+/// this permission, and it lists an app in System Settings only after the app records once.
+#[tauri::command]
+pub async fn request_system_audio() -> Result<()> {
+    tauri::async_runtime::spawn_blocking(probe_system_audio)
+        .await
+        .map_err(|e| MorselError::Audio(e.to_string()))?
+}
+
+fn probe_system_audio() -> Result<()> {
+    use crate::audio::{source::AudioSource, system_tap::SystemTapSource};
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let mut tap = SystemTapSource::new();
+    tap.start(tx)?;
+    std::thread::sleep(SYSTEM_AUDIO_PROBE);
+    tap.stop();
+    drop(rx);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn open_privacy_settings<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

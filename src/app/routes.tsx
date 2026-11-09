@@ -15,6 +15,7 @@ import { SettingsPrivacyScreen } from "../screens/settings/SettingsPrivacyScreen
 import { TemplatesScreen } from "../screens/templates/TemplatesScreen";
 import { OnboardingScreen } from "../screens/onboarding/OnboardingScreen";
 import { AppShell, type RecentItem } from "./AppShell";
+import { UpdateBar } from "./UpdateBar";
 
 function ComingSoon() {
   return <p style={{ padding: 32 }} className="muted">Coming soon.</p>;
@@ -33,6 +34,7 @@ function ShellLayout() {
 
   return (
     <AppShell recent={recent} noteCount={noteCount} onNewNote={() => navigate("/")}>
+      <UpdateBar />
       <Outlet />
     </AppShell>
   );

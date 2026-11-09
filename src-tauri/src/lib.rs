@@ -40,6 +40,7 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| shortcut::on_shortcut(app, event.state()))
@@ -80,6 +81,7 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::delete_all_data,
             permissions::microphone_access,
             permissions::request_microphone,
+            permissions::request_system_audio,
             permissions::open_privacy_settings,
             calendar::service::calendar_status,
             calendar::service::connect_calendar,
@@ -169,7 +171,10 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The updater reads its public key from tauri.conf.json, so only the real app adds it.
+    // The test builder in `configure` has no updater config.
     configure(tauri::Builder::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(setup)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

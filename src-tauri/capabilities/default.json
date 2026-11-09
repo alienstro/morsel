@@ -42,6 +42,7 @@
     "allow-delete-all-data",
     "allow-microphone-access",
     "allow-request-microphone",
+    "allow-request-system-audio",
     "allow-open-privacy-settings",
     "allow-calendar-status",
     "allow-connect-calendar",
@@ -50,6 +51,8 @@
     "allow-upcoming-events",
     "allow-set-global-shortcut",
     "dialog:allow-open",
+    "updater:default",
+    "process:allow-restart",
     "opener:allow-reveal-item-in-dir"
   ]
 }

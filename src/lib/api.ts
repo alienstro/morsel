@@ -82,6 +82,8 @@ export const api = {
   deleteAllData: () => invoke<void>("delete_all_data"),
   microphoneAccess: () => invoke<MicAccess>("microphone_access"),
   requestMicrophone: () => invoke<MicAccess>("request_microphone"),
+  /** Records system audio for a moment, so that macOS asks the user and lists Morsel in its settings. */
+  requestSystemAudio: () => invoke<void>("request_system_audio"),
   openPrivacySettings: (pane: PrivacyPane) => invoke<void>("open_privacy_settings", { pane }),
   calendarStatus: () => invoke<CalendarStatus>("calendar_status"),
   connectCalendar: (provider: Provider) => invoke<void>("connect_calendar", { provider }),

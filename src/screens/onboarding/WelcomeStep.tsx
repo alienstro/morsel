@@ -23,6 +23,15 @@ export function WelcomeStep() {
 
   const askMic = async () => setMic(await api.requestMicrophone());
 
+  // macOS has no public call that reads this permission, so the row tracks only the request.
+  // macOS lists Morsel in System Settings only after Morsel first records system audio.
+  const [systemAudio, setSystemAudio] = useState<"ask" | "asking" | "asked">("ask");
+  const askSystemAudio = async () => {
+    setSystemAudio("asking");
+    await api.requestSystemAudio().catch(() => {});
+    setSystemAudio("asked");
+  };
+
   return (
     <OnboardingLayout
       step={1}
@@ -54,11 +63,17 @@ export function WelcomeStep() {
             <div className="perm-name">System audio</div>
             <div className="muted small">Hears the other people in the call</div>
           </div>
-          <button type="button" className="btn" aria-label="Open System Settings for system audio" onClick={() => api.openPrivacySettings("audio_capture")}>Open System Settings</button>
+          {systemAudio === "ask" && <button type="button" className="btn" aria-label="Allow system audio" onClick={askSystemAudio}>Allow</button>}
+          {systemAudio === "asking" && <button type="button" className="btn" disabled>Asking…</button>}
+          {systemAudio === "asked" && (
+            <button type="button" className="btn" aria-label="Open System Settings for system audio" onClick={() => api.openPrivacySettings("audio_capture")}>Open System Settings</button>
+          )}
         </div>
       </div>
       <p className="muted small" style={{ margin: 0 }}>
-        macOS lists the system audio permission as "Screen &amp; System Audio Recording". Morsel does not record your screen. macOS asks for it the first time you start a note.
+        {systemAudio === "asked"
+          ? 'In System Settings, turn on Morsel under "System Audio Recording Only". Morsel does not record your screen.'
+          : 'macOS lists the system audio permission under "Screen & System Audio Recording". Morsel does not record your screen.'}
       </p>
     </OnboardingLayout>
   );

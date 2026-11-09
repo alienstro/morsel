@@ -60,10 +60,20 @@ describe("Welcome step", () => {
     expect(calls("open_privacy_settings")).toEqual([{ pane: "microphone" }]);
   });
 
-  it("system_audio_opens_system_settings", async () => {
+  it("system_audio_asks_macos_then_opens_system_settings", async () => {
     renderAt("/welcome/1");
+    expect(screen.queryByRole("button", { name: "Open System Settings for system audio" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow system audio" }));
+    expect(calls("request_system_audio")).toHaveLength(1);
     fireEvent.click(await screen.findByRole("button", { name: "Open System Settings for system audio" }));
     expect(calls("open_privacy_settings")).toEqual([{ pane: "audio_capture" }]);
+  });
+
+  it("failed_system_audio_request_still_offers_system_settings", async () => {
+    responses.request_system_audio = () => Promise.reject(new Error("tap failed"));
+    renderAt("/welcome/1");
+    fireEvent.click(await screen.findByRole("button", { name: "Allow system audio" }));
+    expect(await screen.findByRole("button", { name: "Open System Settings for system audio" })).toBeInTheDocument();
   });
 });
 
