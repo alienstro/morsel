@@ -363,16 +363,21 @@ impl AppState {
     /// It never returns. Start it one time, when the app starts.
     pub async fn run_after_jobs(&self) {
         loop {
+            let token = CancellationToken::new();
             let id = loop {
-                if self.session.lock().await.is_none()
-                    && let Some(id) = self.after.pop()
                 {
-                    break id;
+                    // Hold the session lock while the job is marked as running: a meeting that
+                    // starts right after this then finds the job and pauses it.
+                    let session = self.session.lock().await;
+                    if session.is_none()
+                        && let Some(id) = self.after.pop()
+                    {
+                        self.after.set_running(id, token.clone());
+                        break id;
+                    }
                 }
                 self.after.wake.notified().await;
             };
-            let token = CancellationToken::new();
-            self.after.set_running(id, token.clone());
             let result = self.transcribe_after(id, &token).await;
             self.after.clear_running();
             if token.is_cancelled() {
