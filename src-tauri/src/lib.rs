@@ -106,9 +106,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     }
     let http = reqwest::Client::new();
     let secrets: Arc<dyn SecretStore> = Arc::new(KeychainStore);
-    let model_dir = transcribe::model_download::model_dir(&data_dir);
+    // Each on-device model has its own folder in here.
+    let models_root = transcribe::model_download::models_root(&data_dir);
     let engines = Arc::new(RealEngines::new(
-        model_dir.clone(),
+        models_root.clone(),
         http.clone(),
         secrets.clone(),
     ));
@@ -122,7 +123,13 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     ));
     app.manage(calendar.clone());
     app.manage(AppState::new(
-        db, secrets, http, sink, engines, data_dir, model_dir,
+        db,
+        secrets,
+        http,
+        sink,
+        engines,
+        data_dir,
+        models_root,
     ));
     start_calendar_poll(calendar.clone());
     app.manage(calendar::reminder::ReminderState::default());

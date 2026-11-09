@@ -1,8 +1,9 @@
 //! Local transcription with Parakeet TDT 0.6B v3 (int8) through sherpa-onnx.
 
-use super::model_download::model_ready;
 use super::Transcriber;
+use super::model_download::model_ready;
 use crate::audio::PIPELINE_RATE;
+use crate::settings::LocalModel;
 use crate::types::{MorselError, Result};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 use std::path::Path;
@@ -15,7 +16,7 @@ pub struct ParakeetTranscriber {
 impl ParakeetTranscriber {
     /// Loads the model from `dir`. The model must be downloaded first.
     pub fn new(dir: &Path) -> Result<Self> {
-        if !model_ready(dir) {
+        if !model_ready(dir, LocalModel::Parakeet) {
             return Err(MorselError::Transcribe(
                 "the Parakeet model is not downloaded".into(),
             ));
@@ -62,9 +63,9 @@ impl Transcriber for ParakeetTranscriber {
 #[cfg(test)]
 fn default_model_dir_for_tests() -> std::path::PathBuf {
     let home = std::env::var("HOME").expect("HOME");
-    super::model_download::model_dir(
+    LocalModel::Parakeet.dir_in(&super::model_download::models_root(
         &Path::new(&home).join("Library/Application Support/app.morsel"),
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -98,9 +99,14 @@ mod tests {
     #[ignore]
     async fn transcribes_fixture_with_words_hello_and_test() {
         let dir = default_model_dir_for_tests();
-        crate::transcribe::model_download::ensure_model(&reqwest::Client::new(), &dir, |_, _| {})
-            .await
-            .unwrap();
+        crate::transcribe::model_download::ensure_model(
+            &reqwest::Client::new(),
+            &dir,
+            LocalModel::Parakeet,
+            |_, _| {},
+        )
+        .await
+        .unwrap();
         let t = ParakeetTranscriber::new(&dir).unwrap();
         let samples = read_fixture();
         let started = std::time::Instant::now();

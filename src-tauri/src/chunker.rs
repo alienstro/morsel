@@ -1,6 +1,6 @@
 //! Cuts one stream into chunks of 10 to 30 seconds, at a silence when it can.
 
-use crate::audio::{level::rms, PIPELINE_RATE};
+use crate::audio::{PIPELINE_RATE, level::rms};
 use crate::types::{AudioChunk, Speaker};
 
 const RATE: usize = PIPELINE_RATE as usize;

@@ -13,6 +13,16 @@ pub enum TranscribeMode {
     Cloud,
 }
 
+/// The on-device speech model. Parakeet is faster for English and 24 other European
+/// languages. Whisper Turbo is larger and slower, but it knows most languages, Tagalog too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalModel {
+    #[default]
+    Parakeet,
+    WhisperTurbo,
+}
+
 /// Settings never hold an API key. Keys live in the Keychain (see `secrets`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -21,6 +31,8 @@ pub struct Settings {
     pub notes_model: String,
     pub quick_model: String,
     pub transcribe_mode: TranscribeMode,
+    /// The model that `TranscribeMode::Local` uses.
+    pub local_model: LocalModel,
     pub transcribe_base_url: String,
     pub transcribe_model: String,
     pub language: String,
@@ -41,6 +53,7 @@ impl Default for Settings {
             notes_model: String::new(),
             quick_model: String::new(),
             transcribe_mode: TranscribeMode::Local,
+            local_model: LocalModel::Parakeet,
             transcribe_base_url: "https://api.groq.com/openai/v1".into(),
             transcribe_model: "whisper-large-v3-turbo".into(),
             language: "auto".into(),
@@ -86,6 +99,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let conn = crate::db::open(&dir.path().join("morsel.db")).unwrap();
         (dir, conn)
+    }
+
+    #[test]
+    fn old_settings_default_to_parakeet() {
+        let old: Settings = serde_json::from_str(r#"{"transcribeMode":"local"}"#).unwrap();
+        assert_eq!(old.local_model, LocalModel::Parakeet);
+        let s = Settings {
+            local_model: LocalModel::WhisperTurbo,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains(r#""localModel":"whisper_turbo""#), "{json}");
     }
 
     #[test]

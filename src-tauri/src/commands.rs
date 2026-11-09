@@ -11,11 +11,12 @@ use crate::llm::{self, LlmConfig};
 use crate::notes::writer::{CancellationToken, NotesContext};
 use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
 use crate::session::MeetingSession;
-use crate::settings::{self, Settings, TranscribeMode};
+use crate::settings::{self, LocalModel, Settings, TranscribeMode};
 use crate::transcribe::Transcriber;
 use crate::transcribe::cloud::CloudTranscriber;
 use crate::transcribe::model_download::{ensure_model, model_ready};
 use crate::transcribe::parakeet::ParakeetTranscriber;
+use crate::transcribe::whisper::WhisperTranscriber;
 use crate::types::{MeetingId, MorselError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -34,20 +35,23 @@ pub trait Engines: Send + Sync {
 }
 
 /// The real microphone, the system tap, and Parakeet or the cloud.
+/// The loaded on-device transcriber, with the model and the language that it was loaded for.
+type LoadedLocal = (LocalModel, String, Arc<dyn Transcriber>);
+
 pub struct RealEngines {
-    model_dir: PathBuf,
+    models_root: PathBuf,
     http: reqwest::Client,
     secrets: Arc<dyn SecretStore>,
-    parakeet: Mutex<Option<Arc<ParakeetTranscriber>>>,
+    local: Mutex<Option<LoadedLocal>>,
 }
 
 impl RealEngines {
-    pub fn new(model_dir: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
+    pub fn new(models_root: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
         Self {
-            model_dir,
+            models_root,
             http,
             secrets,
-            parakeet: Mutex::new(None),
+            local: Mutex::new(None),
         }
     }
 }
@@ -64,16 +68,28 @@ impl Engines for RealEngines {
     fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
         match settings.transcribe_mode {
             TranscribeMode::Local => {
-                let mut cached = self.parakeet.lock().expect("parakeet lock");
-                if cached.is_none() {
-                    if !model_ready(&self.model_dir) {
-                        return Err(MorselError::Invalid(
-                            "download the transcription model in Settings first".into(),
-                        ));
-                    }
-                    *cached = Some(Arc::new(ParakeetTranscriber::new(&self.model_dir)?));
+                let model = settings.local_model;
+                let mut cached = self.local.lock().expect("local transcriber lock");
+                if let Some((m, lang, t)) = cached.as_ref()
+                    && *m == model
+                    && *lang == settings.language
+                {
+                    return Ok(t.clone());
                 }
-                Ok(cached.clone().expect("loaded") as Arc<dyn Transcriber>)
+                let dir = model.dir_in(&self.models_root);
+                if !model_ready(&dir, model) {
+                    return Err(MorselError::Invalid(
+                        "download the transcription model in Settings first".into(),
+                    ));
+                }
+                let loaded: Arc<dyn Transcriber> = match model {
+                    LocalModel::Parakeet => Arc::new(ParakeetTranscriber::new(&dir)?),
+                    LocalModel::WhisperTurbo => {
+                        Arc::new(WhisperTranscriber::new(&dir, &settings.language)?)
+                    }
+                };
+                *cached = Some((model, settings.language.clone(), loaded.clone()));
+                Ok(loaded)
             }
             TranscribeMode::Cloud => {
                 let key = self.secrets.get(TRANSCRIBE_KEY)?.ok_or_else(|| {
@@ -135,7 +151,7 @@ pub struct AppState {
     pub sink: Arc<dyn EventSink>,
     engines: Arc<dyn Engines>,
     data_dir: PathBuf,
-    model_dir: PathBuf,
+    models_root: PathBuf,
     session: tokio::sync::Mutex<Option<MeetingSession>>,
     notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
 }
@@ -148,7 +164,7 @@ impl AppState {
         sink: Arc<dyn EventSink>,
         engines: Arc<dyn Engines>,
         data_dir: PathBuf,
-        model_dir: PathBuf,
+        models_root: PathBuf,
     ) -> Self {
         Self {
             db,
@@ -157,7 +173,7 @@ impl AppState {
             sink,
             engines,
             data_dir,
-            model_dir,
+            models_root,
             session: tokio::sync::Mutex::new(None),
             notes_jobs: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -512,18 +528,23 @@ impl AppState {
         llm::test_key(&self.http, &self.notes_config(&model)?).await
     }
 
-    pub fn model_ready(&self) -> bool {
-        model_ready(&self.model_dir)
+    pub fn model_ready(&self, model: LocalModel) -> bool {
+        model_ready(&model.dir_in(&self.models_root), model)
     }
 
-    pub async fn download_model(&self) -> Result<()> {
+    pub async fn download_model(&self, model: LocalModel) -> Result<()> {
         let sink = self.sink.clone();
-        ensure_model(&self.http, &self.model_dir, move |received, total| {
-            sink.emit(
-                MODEL_DOWNLOAD,
-                json!({ "received": received, "total": total }),
-            );
-        })
+        ensure_model(
+            &self.http,
+            &model.dir_in(&self.models_root),
+            model,
+            move |received, total| {
+                sink.emit(
+                    MODEL_DOWNLOAD,
+                    json!({ "received": received, "total": total }),
+                );
+            },
+        )
         .await
         .map(|_| ())
     }
@@ -632,13 +653,13 @@ pub async fn test_notes_key(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
-pub async fn model_status(state: State<'_, AppState>) -> Result<bool> {
-    Ok(state.model_ready())
+pub async fn model_status(state: State<'_, AppState>, model: LocalModel) -> Result<bool> {
+    Ok(state.model_ready(model))
 }
 
 #[tauri::command]
-pub async fn download_model(state: State<'_, AppState>) -> Result<()> {
-    state.download_model().await
+pub async fn download_model(state: State<'_, AppState>, model: LocalModel) -> Result<()> {
+    state.download_model(model).await
 }
 
 #[tauri::command]

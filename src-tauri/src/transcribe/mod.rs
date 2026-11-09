@@ -3,6 +3,7 @@
 pub mod cloud;
 pub mod model_download;
 pub mod parakeet;
+pub mod whisper;
 
 use crate::audio::PIPELINE_RATE;
 #[cfg(test)]
