@@ -42,6 +42,7 @@
     "allow-delete-all-data",
     "allow-microphone-access",
     "allow-request-microphone",
+    "allow-request-system-audio",
     "allow-open-privacy-settings",
     "allow-calendar-status",
     "allow-connect-calendar",

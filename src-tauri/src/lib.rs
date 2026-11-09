@@ -81,6 +81,7 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::delete_all_data,
             permissions::microphone_access,
             permissions::request_microphone,
+            permissions::request_system_audio,
             permissions::open_privacy_settings,
             calendar::service::calendar_status,
             calendar::service::connect_calendar,

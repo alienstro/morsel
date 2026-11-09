@@ -34,6 +34,7 @@ const COMMANDS: &[&str] = &[
     "delete_all_data",
     "microphone_access",
     "request_microphone",
+    "request_system_audio",
     "open_privacy_settings",
     "calendar_status",
     "connect_calendar",
