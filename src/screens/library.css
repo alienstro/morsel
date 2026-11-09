@@ -73,3 +73,10 @@
 .icon-btn-light { flex-shrink: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text); cursor: pointer; }
 .icon-btn-light:hover:not(:disabled) { background: var(--bg); }
 .icon-btn-light:disabled { opacity: 0.35; cursor: default; }
+.next-time { font-size: 13px; color: var(--muted); flex-shrink: 0; }
+.next-text { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.next-title { font-family: var(--font-serif); font-size: 18px; }
+.btn.next-skip { align-self: flex-start; padding: 0; margin-top: -8px; }
+.shortcut-key { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-sunk); font: 500 12px var(--font-ui); white-space: nowrap; }
+.shortcut-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.shortcut-list li { display: flex; align-items: center; gap: 12px; }

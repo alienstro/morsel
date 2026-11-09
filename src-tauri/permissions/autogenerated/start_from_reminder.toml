@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-from-reminder"
+description = "Enables the start_from_reminder command without any pre-configured scope."
+commands.allow = ["start_from_reminder"]
+
+[[permission]]
+identifier = "deny-start-from-reminder"
+description = "Denies the start_from_reminder command without any pre-configured scope."
+commands.deny = ["start_from_reminder"]

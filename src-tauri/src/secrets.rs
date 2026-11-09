@@ -7,9 +7,10 @@ use std::sync::Mutex;
 pub const SERVICE: &str = "app.morsel";
 pub const NOTES_KEY: &str = "notes_api_key";
 pub const TRANSCRIBE_KEY: &str = "transcribe_api_key";
+pub const COMPOSIO_KEY: &str = "composio_api_key";
 
 /// Every Keychain account that Morsel uses.
-pub const ACCOUNTS: &[&str] = &[NOTES_KEY, TRANSCRIBE_KEY];
+pub const ACCOUNTS: &[&str] = &[NOTES_KEY, TRANSCRIBE_KEY, COMPOSIO_KEY];
 
 /// True for an account that Morsel uses.
 pub fn is_known_account(account: &str) -> bool {

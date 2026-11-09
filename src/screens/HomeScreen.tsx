@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { api, errorMessage, type MeetingSummary, type Template } from "../lib/api";
+import { api, errorMessage, onCalendarChanged, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
+import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
 import "./library.css";
 import "./note/note.css";
@@ -19,7 +20,7 @@ function groupByDay(meetings: MeetingSummary[]): [string, MeetingSummary[]][] {
   return groups;
 }
 
-/** Basic Home for Plan 1: start an unscheduled meeting and open recent notes. The calendar card comes in Plan 3. */
+/** Home: the next calendar meeting (or a plain start), recent notes, and the Ask box. */
 export function HomeScreen() {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -30,6 +31,23 @@ export function HomeScreen() {
   const [starting, setStarting] = useState(false);
   const [question, setQuestion] = useState("");
   const askRef = useRef<HTMLInputElement>(null);
+  const [next, setNext] = useState<CalendarEvent | null>(null);
+  const [unscheduled, setUnscheduled] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const load = () => api.upcomingEvents().then((list) => setNext(list?.[0] ?? null)).catch(() => {});
+    load();
+    const off = onCalendarChanged(load);
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      load();
+    }, 30_000);
+    return () => {
+      off.then((f) => f());
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,11 +71,15 @@ export function HomeScreen() {
     api.listMeetings(8).then(setMeetings).catch(() => {});
   }, []);
 
+  const event = unscheduled ? null : next;
+
   const start = async () => {
     setError(null);
     setStarting(true);
     try {
-      const id = await api.startMeeting(title.trim() || null, templateId);
+      const id = event
+        ? await api.startMeeting(event.title, templateId, event.people)
+        : await api.startMeeting(title.trim() || null, templateId);
       navigate(`/meeting/${id}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -69,9 +91,21 @@ export function HomeScreen() {
     <div className="page">
       <h1 className="serif page-title">Good to see you.</h1>
       <section aria-labelledby="start" className="start-card">
-        <h2 id="start" className="sr-only">Start a meeting</h2>
-        <label htmlFor="title" className="sr-only">Meeting title</label>
-        <input id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <h2 id="start" className="sr-only">{event ? "Next meeting" : "Start a meeting"}</h2>
+        {event ? (
+          <>
+            <span className="tabular next-time">{clockTime(event.start)}</span>
+            <div className="next-text">
+              <div className="truncate next-title">{event.title}</div>
+              <div className="truncate muted small">{eventLine(event, now)}</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <label htmlFor="title" className="sr-only">Meeting title</label>
+            <input id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </>
+        )}
         <label htmlFor="template" className="sr-only">Template</label>
         <select id="template" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -81,6 +115,9 @@ export function HomeScreen() {
           Start notes
         </button>
       </section>
+      {event && (
+        <button type="button" className="btn btn-link next-skip" onClick={() => setUnscheduled(true)}>Start a note without the calendar</button>
+      )}
       {error && <p role="alert" className="error-text">{error}</p>}
       <section aria-labelledby="earlier">
         <div className="section-head">

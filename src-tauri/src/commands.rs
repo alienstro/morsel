@@ -176,6 +176,17 @@ impl AppState {
         title: Option<String>,
         template_id: i64,
     ) -> Result<MeetingId> {
+        self.start_meeting_with(title, template_id, Vec::new())
+            .await
+    }
+
+    /// Starts a meeting with the people of its calendar event.
+    pub async fn start_meeting_with(
+        &self,
+        title: Option<String>,
+        template_id: i64,
+        people: Vec<String>,
+    ) -> Result<MeetingId> {
         let mut slot = self.session.lock().await;
         if slot.is_some() {
             return Err(MorselError::AlreadyRecording);
@@ -197,7 +208,16 @@ impl AppState {
             Some(settings.language),
         )?;
         *slot = Some(session);
+        if !people.is_empty() {
+            let conn = self.db.lock().map_err(|_| MorselError::Db("lock".into()))?;
+            meetings::set_people(&conn, id, &people)?;
+        }
         Ok(id)
+    }
+
+    /// The id of the meeting that records now.
+    pub async fn recording_meeting(&self) -> Option<MeetingId> {
+        self.session.lock().await.as_ref().map(|s| s.id())
     }
 
     pub async fn pause_meeting(&self) -> Result<()> {
@@ -514,8 +534,11 @@ pub async fn start_meeting(
     state: State<'_, AppState>,
     title: Option<String>,
     template_id: i64,
+    people: Option<Vec<String>>,
 ) -> Result<MeetingId> {
-    state.start_meeting(title, template_id).await
+    state
+        .start_meeting_with(title, template_id, people.unwrap_or_default())
+        .await
 }
 
 #[tauri::command]
@@ -941,6 +964,58 @@ mod tests {
         assert_eq!(all[1].name, "1:1");
         assert!(all.iter().all(|t| t.id != custom));
         assert_eq!(s.data_info().unwrap().notes, 0);
+    }
+
+    #[tokio::test]
+    async fn recording_meeting_is_the_live_one() {
+        let (_d, s) = state();
+        assert_eq!(s.recording_meeting().await, None);
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert_eq!(s.recording_meeting().await, Some(id));
+        s.stop_meeting().await.unwrap();
+        assert_eq!(s.recording_meeting().await, None);
+    }
+
+    #[tokio::test]
+    async fn start_meeting_saves_the_people() {
+        let (_d, s) = state();
+        let id = s
+            .start_meeting_with(
+                Some("Weekly product sync".into()),
+                1,
+                vec!["Sam".into(), " ".into(), "Priya".into()],
+            )
+            .await
+            .unwrap();
+        s.stop_meeting().await.unwrap();
+        let summary = s.get_meeting(id).unwrap().summary;
+        assert_eq!(summary.title, "Weekly product sync");
+        assert_eq!(summary.people, vec!["Sam", "Priya"]);
+    }
+
+    #[tokio::test]
+    async fn delete_all_data_removes_the_composio_key() {
+        let (_d, s) = state();
+        s.set_api_key(crate::secrets::COMPOSIO_KEY, "ck-secret")
+            .unwrap();
+        {
+            let db = s.db.lock().unwrap();
+            crate::calendar::service::save_link(
+                &db,
+                &crate::calendar::service::CalendarLink {
+                    user_id: "morsel-x".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        s.delete_all_data().await.unwrap();
+        assert!(!s.has_api_key(crate::secrets::COMPOSIO_KEY).unwrap());
+        let db = s.db.lock().unwrap();
+        assert_eq!(
+            crate::calendar::service::load_link(&db).unwrap(),
+            Default::default()
+        );
     }
 
     #[tokio::test]

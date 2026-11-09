@@ -24,7 +24,15 @@ pub struct Settings {
     pub transcribe_base_url: String,
     pub transcribe_model: String,
     pub language: String,
+    /// False until the user finishes or skips the first-run screens.
+    pub onboarded: bool,
+    /// Show a reminder one minute before a calendar meeting.
+    pub remind_before_meeting: bool,
+    /// The global shortcut that starts a note, in the Tauri accelerator format.
+    pub global_shortcut: String,
 }
+
+pub const DEFAULT_SHORTCUT: &str = "CommandOrControl+Shift+M";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -36,6 +44,9 @@ impl Default for Settings {
             transcribe_base_url: "https://api.groq.com/openai/v1".into(),
             transcribe_model: "whisper-large-v3-turbo".into(),
             language: "auto".into(),
+            onboarded: false,
+            remind_before_meeting: true,
+            global_shortcut: DEFAULT_SHORTCUT.into(),
         }
     }
 }
@@ -85,6 +96,29 @@ mod tests {
         assert_eq!(s.transcribe_model, "whisper-large-v3-turbo");
         assert_eq!(s.notes_base_url, "https://openrouter.ai/api/v1");
         assert_eq!(s.language, "auto");
+    }
+
+    #[test]
+    fn default_settings_need_onboarding() {
+        let s = Settings::default();
+        assert!(!s.onboarded);
+        assert!(s.remind_before_meeting);
+        assert_eq!(s.global_shortcut, "CommandOrControl+Shift+M");
+    }
+
+    #[test]
+    fn old_settings_json_loads_with_new_defaults() {
+        let (_d, conn) = temp_db();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('app', ?1)",
+            [r#"{"notesModel":"old/model","transcribeMode":"cloud"}"#],
+        )
+        .unwrap();
+        let s = load_settings(&conn).unwrap();
+        assert_eq!(s.notes_model, "old/model");
+        assert!(!s.onboarded);
+        assert!(s.remind_before_meeting);
+        assert_eq!(s.global_shortcut, "CommandOrControl+Shift+M");
     }
 
     #[test]

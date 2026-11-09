@@ -32,6 +32,18 @@ const COMMANDS: &[&str] = &[
     "data_info",
     "export_all",
     "delete_all_data",
+    "microphone_access",
+    "request_microphone",
+    "open_privacy_settings",
+    "calendar_status",
+    "connect_calendar",
+    "disconnect_calendar",
+    "refresh_calendar",
+    "upcoming_events",
+    "reminder_event",
+    "start_from_reminder",
+    "dismiss_reminder",
+    "set_global_shortcut",
 ];
 
 fn main() {

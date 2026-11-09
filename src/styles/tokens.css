@@ -50,3 +50,4 @@ button { font: inherit; color: inherit; }
 .nav-link[aria-current="page"] { background: var(--surface); font-weight: 500; }
 .content { flex-grow: 1; min-width: 0; padding: 0 8px 8px 0; display: flex; }
 .surface { flex-grow: 1; background: var(--surface); border-radius: var(--radius-card); }
+.btn.btn-link { border: 0; background: transparent; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }

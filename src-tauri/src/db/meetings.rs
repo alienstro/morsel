@@ -100,6 +100,21 @@ pub fn set_status(conn: &Connection, id: MeetingId, status: MeetingStatus) -> Re
     reindex_meeting(conn, id)
 }
 
+/// Saves the people of a calendar meeting. Empty names are dropped.
+pub fn set_people(conn: &Connection, id: MeetingId, people: &[String]) -> Result<()> {
+    let clean: Vec<&str> = people
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let json = serde_json::to_string(&clean).map_err(|e| MorselError::Invalid(e.to_string()))?;
+    conn.execute(
+        "UPDATE meetings SET people = ?1 WHERE id = ?2",
+        params![json, id],
+    )?;
+    Ok(())
+}
+
 pub fn set_title(conn: &Connection, id: MeetingId, title: &str) -> Result<()> {
     conn.execute(
         "UPDATE meetings SET title = ?1 WHERE id = ?2",
