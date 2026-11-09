@@ -13,7 +13,8 @@ use crate::types::{AudioChunk, MeetingId, MorselError, Result, Speaker, Transcri
 use serde_json::json;
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 /// The job reads one second of audio at a time, so a long meeting never fills the memory.
 const PIECE: usize = PIPELINE_RATE as usize;
@@ -145,6 +146,85 @@ fn emit_progress(sink: &Arc<dyn EventSink>, id: MeetingId, done_ms: u64, total_m
     );
 }
 
+/// The meetings that wait for the after job, oldest first, and the one that runs now.
+#[derive(Default)]
+pub struct AfterQueue {
+    waiting: Mutex<VecDeque<MeetingId>>,
+    running: Mutex<Option<(MeetingId, CancellationToken)>>,
+    /// Wakes the worker when a meeting is queued or a recording stops.
+    pub wake: Notify,
+}
+
+impl AfterQueue {
+    /// Adds a meeting at the end. Returns false when it is already queued or running.
+    pub fn push(&self, id: MeetingId) -> bool {
+        let mut waiting = self.waiting.lock().expect("after queue lock");
+        if waiting.contains(&id) || self.running_id() == Some(id) {
+            return false;
+        }
+        waiting.push_back(id);
+        self.wake.notify_one();
+        true
+    }
+
+    /// Puts a paused meeting back at the front, so that it continues first.
+    pub fn push_front(&self, id: MeetingId) {
+        self.waiting
+            .lock()
+            .expect("after queue lock")
+            .push_front(id);
+    }
+
+    pub fn pop(&self) -> Option<MeetingId> {
+        self.waiting.lock().expect("after queue lock").pop_front()
+    }
+
+    pub fn waiting(&self) -> Vec<MeetingId> {
+        self.waiting
+            .lock()
+            .expect("after queue lock")
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    pub fn set_running(&self, id: MeetingId, token: CancellationToken) {
+        *self.running.lock().expect("after queue lock") = Some((id, token));
+    }
+
+    pub fn clear_running(&self) {
+        *self.running.lock().expect("after queue lock") = None;
+    }
+
+    fn running_id(&self) -> Option<MeetingId> {
+        self.running
+            .lock()
+            .expect("after queue lock")
+            .as_ref()
+            .map(|(id, _)| *id)
+    }
+
+    /// Stops the running job after its current chunk. The worker queues it again at the front.
+    pub fn pause_running(&self) {
+        if let Some((_, token)) = self.running.lock().expect("after queue lock").as_ref() {
+            token.cancel();
+        }
+    }
+
+    /// Takes a meeting out of the queue, and stops its job when it runs.
+    pub fn remove(&self, id: MeetingId) {
+        self.waiting
+            .lock()
+            .expect("after queue lock")
+            .retain(|&m| m != id);
+        if let Some((running, token)) = self.running.lock().expect("after queue lock").as_ref()
+            && *running == id
+        {
+            token.cancel();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,7 +232,6 @@ mod tests {
     use crate::db::meetings::{add_line, create_meeting, get_meeting};
     use crate::events::{TRANSCRIBE_PROGRESS, VecSink};
     use crate::types::{Speaker, TranscriptLine};
-    use std::sync::Mutex;
 
     /// Records the length of each call.
     #[derive(Default)]

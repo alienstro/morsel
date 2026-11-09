@@ -63,6 +63,7 @@ pub struct MeetingSession {
     paused: Arc<AtomicBool>,
     pumps: Vec<JoinHandle<()>>,
     levels: JoinHandle<()>,
+    timing: TranscribeTiming,
 }
 
 impl MeetingSession {
@@ -152,6 +153,7 @@ impl MeetingSession {
                 paused,
                 pumps,
                 levels,
+                timing,
             },
             id,
         ))
@@ -159,6 +161,10 @@ impl MeetingSession {
 
     pub fn id(&self) -> MeetingId {
         self.shared.id
+    }
+
+    pub fn timing(&self) -> TranscribeTiming {
+        self.timing
     }
 
     pub fn pause(&self) -> Result<()> {
