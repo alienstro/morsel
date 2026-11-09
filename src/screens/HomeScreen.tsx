@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api, errorMessage, type MeetingSummary, type Template } from "../lib/api";
+import "./library.css";
 import "./note/note.css";
 
 const LIVE = ["recording", "paused"];
@@ -14,6 +15,25 @@ export function HomeScreen() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [question, setQuestion] = useState("");
+  const askRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        askRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const ask = (e: FormEvent) => {
+    e.preventDefault();
+    const q = question.trim();
+    if (q) navigate(`/ask?q=${encodeURIComponent(q)}`);
+  };
 
   useEffect(() => {
     api.listTemplates().then(setTemplates).catch((e) => setError(errorMessage(e)));
@@ -63,6 +83,12 @@ export function HomeScreen() {
           ))}
         </ul>
       </section>
+      <form className="home-ask" onSubmit={ask}>
+        <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+        <label htmlFor="home-ask" className="sr-only">Ask about any meeting</label>
+        <input ref={askRef} id="home-ask" type="text" placeholder="Ask about any meeting" value={question} onChange={(e) => setQuestion(e.target.value)} />
+        <kbd>⌘K</kbd>
+      </form>
     </div>
   );
 }

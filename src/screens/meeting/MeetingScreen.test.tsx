@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
@@ -85,5 +85,14 @@ describe("MeetingScreen", () => {
     await renderScreen();
     act(() => emit("meeting://status", { meetingId: 1, status: "recording", warning: "Others are not recorded: no permission" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Others are not recorded");
+  });
+
+  it("meeting_panel_asks_about_this_meeting", async () => {
+    responses.ask = { id: null, question: "Who is blocked?", answer: "Leo is blocked on the API.", sources: [] };
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText("Ask about this meeting"), { target: { value: "Who is blocked?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("ask", { question: "Who is blocked?", range: "all", meetingId: 1 }));
+    expect(await screen.findByText("Leo is blocked on the API.")).toBeInTheDocument();
   });
 });

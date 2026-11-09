@@ -46,3 +46,9 @@ export function meetingLength(startedAt: number, endedAt: number | null): string
 }
 
 export { time as clockTime };
+
+/** "2 Nov". */
+export function dayMonth(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getDate()} ${d.toLocaleDateString("en-GB", { month: "short" })}`;
+}

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../test/tauri";
@@ -29,10 +29,24 @@ function renderAt(path: string) {
         <Route path="/" element={<HomeScreen />} />
         <Route path="/settings/models" element={<SettingsModelsScreen />} />
         <Route path="/meeting/:id" element={<p>meeting page</p>} />
+        <Route path="/ask" element={<p>ask page</p>} />
       </Routes>
     </MemoryRouter>,
   );
 }
+
+describe("HomeScreen ask box", () => {
+  it("home_cmd_k_focuses_ask_box", async () => {
+    renderAt("/");
+    const box = await screen.findByLabelText("Ask about any meeting");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(box).toHaveFocus();
+    fireEvent.change(box, { target: { value: "open action items" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(await screen.findByText("ask page")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByLabelText("Ask about any meeting")).not.toBeInTheDocument());
+  });
+});
 
 describe("HomeScreen", () => {
   it("start_notes_uses_the_selected_template", async () => {
