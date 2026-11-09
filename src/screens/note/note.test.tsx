@@ -122,4 +122,25 @@ describe("NoteScreen", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_meeting", { meetingId: 1 }));
     expect(await screen.findByText("notes page")).toBeInTheDocument();
   });
+  it("note_page_deletes_the_audio_after_a_confirmation", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
+    responses.audio_size = 230_000_000;
+    responses.delete_audio = null;
+    renderAt("/note/1");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete audio (230 MB)" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the audio?" });
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "delete_audio")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete audio" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_audio", { meetingId: 1 }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Delete audio/ })).not.toBeInTheDocument());
+    expect(screen.getByText("The audio is deleted. The notes and the transcript stay.")).toBeInTheDocument();
+  });
+
+  it("note_page_has_no_audio_button_without_audio", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
+    responses.audio_size = null;
+    renderAt("/note/1");
+    await screen.findByRole("button", { name: "Delete note" });
+    expect(screen.queryByRole("button", { name: /^Delete audio/ })).not.toBeInTheDocument();
+  });
 });

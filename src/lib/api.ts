@@ -66,6 +66,9 @@ export const api = {
   testNotesKey: () => invoke<void>("test_notes_key"),
   modelStatus: () => invoke<boolean>("model_status"),
   downloadModel: () => invoke<void>("download_model"),
+  /** The size in bytes of the saved audio of a meeting, or null when it has none. */
+  audioSize: (meetingId: number) => invoke<number | null>("audio_size", { meetingId }),
+  deleteAudio: (meetingId: number) => invoke<void>("delete_audio", { meetingId }),
   exportNote: (meetingId: number, path: string) => invoke<void>("export_note", { meetingId, path }),
   searchNotes: (filter: NotesFilter) => invoke<NotesPage>("search_notes", { filter }),
   listPeople: () => invoke<string[]>("list_people"),
