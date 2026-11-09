@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
+import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
 import { markYours, type NotePart } from "../../lib/markYours";
 import "./note.css";
@@ -50,6 +51,7 @@ export function NoteScreen() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     api.getMeeting(id).then((d) => {
@@ -89,6 +91,16 @@ export function NoteScreen() {
     }
   };
 
+  const remove = async () => {
+    setConfirming(false);
+    try {
+      await api.deleteMeeting(id);
+      navigate("/notes");
+    } catch (e) {
+      setInfo(errorMessage(e));
+    }
+  };
+
   return (
     <div className="page">
       <h1 className="serif page-title">{detail.summary.title}</h1>
@@ -105,6 +117,9 @@ export function NoteScreen() {
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <button type="button" className="btn btn-primary" onClick={writeAgain}>{note ? "Write again" : "Write notes"}</button>
+        <button type="button" className="icon-btn" aria-label="Delete note" onClick={() => setConfirming(true)}>
+          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+        </button>
       </div>
       {info && <p role="status" className="muted small">{info}</p>}
       {note ? (
@@ -129,6 +144,15 @@ export function NoteScreen() {
           ))}
         </ol>
       </details>
+      {confirming && (
+        <ConfirmDialog
+          title="Delete this note?"
+          body="The note, your rough notes and the transcript go away. You cannot undo this."
+          confirmLabel="Delete note"
+          onConfirm={remove}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </div>
   );
 }

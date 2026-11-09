@@ -20,3 +20,23 @@
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn-danger { border-color: var(--recording); color: var(--recording); }
 .btn-danger-fill { background: var(--recording); border-color: var(--recording); color: var(--surface); }
+.tpl-layout { display: flex; flex-wrap: wrap; min-height: 100%; }
+.tpl-list { flex: 1 0 220px; max-width: 260px; padding: 20px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.tpl-list-head { display: flex; align-items: center; padding: 0 6px; }
+.tpl-list-head h1 { margin: 0; flex-grow: 1; font: 400 22px var(--font-serif); }
+.tpl-item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tpl-item[aria-current="true"] { background: var(--bg); }
+.tpl-item:hover { background: var(--bg); }
+.tpl-item .name { font-weight: 500; }
+.tpl-form { flex: 999 1 420px; min-width: 0; max-width: 680px; padding: 20px 28px; display: flex; flex-direction: column; gap: 16px; }
+.tpl-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 12px; align-items: center; }
+.tpl-grid label { color: var(--muted); }
+.tpl-input { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font: 400 13px var(--font-ui); color: var(--text); min-width: 0; }
+.tpl-sections { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 4px; }
+.tpl-sections legend { padding: 0 0 6px; font-weight: 600; font-size: 12px; }
+.section-row { display: flex; align-items: center; gap: 6px; }
+.section-row .tpl-input:first-child { flex: 0 0 180px; font-weight: 500; }
+.section-row .tpl-input:nth-child(2) { flex: 1 1 auto; }
+.tpl-textarea { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font: 400 13px/1.5 var(--font-ui); color: var(--text); resize: vertical; }
+.link-btn { align-self: flex-start; height: 28px; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font: 500 12px var(--font-ui); cursor: pointer; white-space: nowrap; }
+.link-btn:hover { color: var(--text); }
