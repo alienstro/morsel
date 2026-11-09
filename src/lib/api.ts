@@ -32,7 +32,14 @@ export type Settings = {
 };
 export type MicAccess = "allowed" | "denied" | "unknown";
 export type PrivacyPane = "microphone" | "audio_capture";
-export type KeyAccount = "notes_api_key" | "transcribe_api_key";
+export type KeyAccount = "notes_api_key" | "transcribe_api_key" | "composio_api_key";
+export type Provider = "google" | "outlook";
+export type LinkState = "none" | "pending" | "connected";
+export type ProviderStatus = { state: LinkState; today: number };
+export type CalendarStatus = { hasKey: boolean; google: ProviderStatus; outlook: ProviderStatus };
+export type CalendarEvent = {
+  id: string; provider: Provider; title: string; start: number; end: number; link: string | null; people: string[];
+};
 export type MorselError = { code: string; message: string };
 
 export type StatusEvent = { meetingId: number; status: MeetingStatus; warning: string | null };
@@ -75,6 +82,11 @@ export const api = {
   microphoneAccess: () => invoke<MicAccess>("microphone_access"),
   requestMicrophone: () => invoke<MicAccess>("request_microphone"),
   openPrivacySettings: (pane: PrivacyPane) => invoke<void>("open_privacy_settings", { pane }),
+  calendarStatus: () => invoke<CalendarStatus>("calendar_status"),
+  connectCalendar: (provider: Provider) => invoke<void>("connect_calendar", { provider }),
+  disconnectCalendar: (provider: Provider) => invoke<void>("disconnect_calendar", { provider }),
+  refreshCalendar: () => invoke<void>("refresh_calendar"),
+  upcomingEvents: () => invoke<CalendarEvent[]>("upcoming_events"),
 };
 
 function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -86,6 +98,7 @@ export const onLevels = (h: (levels: LevelsEvent) => void) => on("meeting://leve
 export const onStatus = (h: (status: StatusEvent) => void) => on("meeting://status", h);
 export const onNotesDone = (h: (e: { meetingId: number }) => void) => on("notes://done", h);
 export const onNotesFailed = (h: (e: { meetingId: number; message: string }) => void) => on("notes://failed", h);
+export const onCalendarChanged = (h: () => void) => on("calendar://changed", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
 
 /** The text to show for any error from a command. */

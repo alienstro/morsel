@@ -14,11 +14,13 @@ pub mod settings;
 pub mod transcribe;
 pub mod types;
 
+use calendar::service::CalendarService;
 use commands::{AppState, RealEngines};
 use events::EventSink;
 use secrets::{KeychainStore, SecretStore};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Builder, Emitter, Manager, Runtime};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Sends backend events to every window.
 pub struct TauriSink<R: Runtime>(pub AppHandle<R>);
@@ -36,6 +38,7 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_meeting,
             commands::pause_meeting,
@@ -72,6 +75,11 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             permissions::microphone_access,
             permissions::request_microphone,
             permissions::open_privacy_settings,
+            calendar::service::calendar_status,
+            calendar::service::connect_calendar,
+            calendar::service::disconnect_calendar,
+            calendar::service::refresh_calendar,
+            calendar::service::upcoming_events,
         ])
 }
 
@@ -93,10 +101,60 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         secrets.clone(),
     ));
     let sink = Arc::new(TauriSink(app.handle().clone()));
+    let calendar = Arc::new(CalendarService::new(
+        db.clone(),
+        secrets.clone(),
+        http.clone(),
+        calendar::composio::BASE_URL,
+        sink.clone(),
+    ));
+    app.manage(calendar.clone());
     app.manage(AppState::new(
         db, secrets, http, sink, engines, data_dir, model_dir,
     ));
+    start_calendar_poll(calendar.clone());
+    let handle = app.handle().clone();
+    app.deep_link().on_open_url(move |event| {
+        let from_calendar = event
+            .urls()
+            .iter()
+            .any(|u| u.scheme() == "morsel" && u.host_str() == Some("calendar"));
+        if from_calendar {
+            show_main(&handle);
+            let cal = calendar.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = cal.check_pending().await {
+                    eprintln!("cannot check the calendar link: {err}");
+                }
+                let _ = cal.refresh(chrono::Utc::now().timestamp_millis()).await;
+            });
+        }
+    });
     Ok(())
+}
+
+/// Reads the calendars now and then every 5 minutes.
+fn start_calendar_poll(calendar: Arc<CalendarService>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            if let Err(err) = calendar
+                .refresh(chrono::Utc::now().timestamp_millis())
+                .await
+            {
+                eprintln!("cannot read the calendars: {err}");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+        }
+    });
+}
+
+/// Shows and focuses the main window.
+pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

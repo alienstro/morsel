@@ -35,6 +35,11 @@ const COMMANDS: &[&str] = &[
     "microphone_access",
     "request_microphone",
     "open_privacy_settings",
+    "calendar_status",
+    "connect_calendar",
+    "disconnect_calendar",
+    "refresh_calendar",
+    "upcoming_events",
 ];
 
 fn main() {

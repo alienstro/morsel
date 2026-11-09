@@ -2,6 +2,7 @@
 
 pub mod composio;
 pub mod events;
+pub mod service;
 
 use serde::{Deserialize, Serialize};
 

@@ -944,6 +944,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_all_data_removes_the_composio_key() {
+        let (_d, s) = state();
+        s.set_api_key(crate::secrets::COMPOSIO_KEY, "ck-secret")
+            .unwrap();
+        {
+            let db = s.db.lock().unwrap();
+            crate::calendar::service::save_link(
+                &db,
+                &crate::calendar::service::CalendarLink {
+                    user_id: "morsel-x".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        s.delete_all_data().await.unwrap();
+        assert!(!s.has_api_key(crate::secrets::COMPOSIO_KEY).unwrap());
+        let db = s.db.lock().unwrap();
+        assert_eq!(
+            crate::calendar::service::load_link(&db).unwrap(),
+            Default::default()
+        );
+    }
+
+    #[tokio::test]
     async fn delete_all_refuses_while_recording() {
         let (_d, s) = state();
         s.start_meeting(None, 1).await.unwrap();

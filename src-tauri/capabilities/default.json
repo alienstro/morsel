@@ -43,6 +43,11 @@
     "allow-microphone-access",
     "allow-request-microphone",
     "allow-open-privacy-settings",
+    "allow-calendar-status",
+    "allow-connect-calendar",
+    "allow-disconnect-calendar",
+    "allow-refresh-calendar",
+    "allow-upcoming-events",
     "dialog:allow-open",
     "opener:allow-reveal-item-in-dir"
   ]
