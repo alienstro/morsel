@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, type KeyAccount, type LocalModel, type Settings, type UsageTotal } from "../lib/api";
-import { LOCAL_MODELS, useLocalModels } from "../lib/localModels";
+import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
+import { LOCAL_MODEL, useLocalModel } from "../lib/localModel";
 import "./note/note.css";
 
 type KeyFieldProps = { account: KeyAccount; label: string };
@@ -51,7 +51,7 @@ export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
-  const models = useLocalModels();
+  const model = useLocalModel();
   const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
@@ -117,11 +117,7 @@ export function SettingsModelsScreen() {
           <label><input type="radio" name="mode" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} /> Cloud (your key)</label>
         </fieldset>
         {settings.transcribeMode === "local" ? (
-          <LocalModelField
-            model={settings.localModel}
-            onModel={(m) => set("localModel", m)}
-            models={models}
-          />
+          <LocalModelField model={model} />
         ) : (
           <>
             <div className="field">
@@ -149,28 +145,16 @@ export function SettingsModelsScreen() {
   );
 }
 
-/** The on-device model choice, its download state, and the download button. */
-function LocalModelField({ model, onModel, models }: {
-  model: LocalModel;
-  onModel: (m: LocalModel) => void;
-  models: ReturnType<typeof useLocalModels>;
-}) {
-  const info = LOCAL_MODELS[model];
-  const p = models.downloading === model ? models.progress : null;
+/** The download state of the on-device model, and the download button. */
+function LocalModelField({ model }: { model: ReturnType<typeof useLocalModel> }) {
+  const p = model.downloading ? model.progress : null;
   const percent = p && p.total > 0 ? Math.floor((p.received / p.total) * 100) : p ? 0 : null;
   return (
     <div className="field">
-      <fieldset className="row">
-        <legend className="sr-only">On-device model</legend>
-        {(Object.keys(LOCAL_MODELS) as LocalModel[]).map((m) => (
-          <label key={m}>
-            <input type="radio" name="local-model" checked={model === m} onChange={() => onModel(m)} /> {LOCAL_MODELS[m].name} ({LOCAL_MODELS[m].about})
-          </label>
-        ))}
-      </fieldset>
-      <span>{info.name} model ({info.size}): {models.ready[model] ? "ready" : "not downloaded"}</span>
-      {!models.ready[model] && percent === null && (
-        <button type="button" className="btn" disabled={models.downloading !== null} onClick={() => models.download(model)}>Download the model</button>
+      <span>{LOCAL_MODEL.name} model ({LOCAL_MODEL.size}): {model.ready ? "ready" : "not downloaded"}</span>
+      <span className="muted small">{LOCAL_MODEL.about}</span>
+      {!model.ready && percent === null && (
+        <button type="button" className="btn" onClick={model.download}>Download the model</button>
       )}
       {percent !== null && (
         <>
@@ -178,7 +162,7 @@ function LocalModelField({ model, onModel, models }: {
           <span className="small">Downloading: {percent}%</span>
         </>
       )}
-      {models.error && <span role="alert" className="error-text small">{models.error}</span>}
+      {model.error && <span role="alert" className="error-text small">{model.error}</span>}
     </div>
   );
 }

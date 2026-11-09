@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", localModel: "parakeet",
+  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
   onboarded: false, remindBeforeMeeting: true, globalShortcut: "CommandOrControl+Shift+M",
 };
@@ -80,9 +80,10 @@ describe("Welcome step", () => {
 describe("AI step", () => {
   it("transcription_options_name_their_languages", async () => {
     renderAt("/welcome/2");
-    expect(await screen.findByRole("radio", { name: /^On this Mac: Parakeet.*25 European languages, not Tagalog/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /^On this Mac: Whisper Turbo.*Tagalog too/ })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: /^On this Mac: Whisper Turbo.*Tagalog too/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^Cloud.*Tagalog too/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
   it("ai_step_saves_settings_then_tests_the_connection", async () => {
@@ -111,21 +112,9 @@ describe("AI step", () => {
     responses.download_model = () => new Promise(() => {});
     renderAt("/welcome/2");
     fireEvent.click(await screen.findByRole("button", { name: "Download the model" }));
-    await waitFor(() => expect(calls("download_model")).toEqual([{ model: "parakeet" }]));
+    await waitFor(() => expect(calls("download_model")).toHaveLength(1));
     act(() => emit("model://download", { received: 384 * 1_000_000, total: 600 * 1_000_000 }));
     expect(await screen.findByText("Downloading, 384 of 600 MB")).toBeInTheDocument();
-  });
-
-  it("ai_step_whisper_choice_downloads_whisper_and_saves_it", async () => {
-    responses.download_model = () => new Promise(() => {});
-    renderAt("/welcome/2");
-    fireEvent.click(await screen.findByRole("radio", { name: /^On this Mac: Whisper Turbo/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Download the model" }));
-    await waitFor(() => expect(calls("download_model")).toEqual([{ model: "whisper_turbo" }]));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() =>
-      expect(calls("save_settings")[0]).toMatchObject({ settings: { transcribeMode: "local", localModel: "whisper_turbo" } }),
-    );
   });
 
   it("ai_step_back_goes_to_step_1", async () => {

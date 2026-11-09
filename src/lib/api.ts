@@ -25,10 +25,8 @@ export type AskSource = { meetingId: number; title: string; startedAt: number };
 export type AskAnswer = { id: number | null; question: string; answer: string; sources: AskSource[] };
 export type UsageTotal = { promptTokens: number; completionTokens: number; cost: number | null };
 export type DataInfo = { path: string; notes: number; bytes: number };
-/** The on-device speech model. Parakeet is faster; Whisper Turbo knows more languages, Tagalog too. */
-export type LocalModel = "parakeet" | "whisper_turbo";
 export type Settings = {
-  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud"; localModel: LocalModel;
+  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
   onboarded: boolean; remindBeforeMeeting: boolean; globalShortcut: string;
 };
@@ -65,8 +63,8 @@ export const api = {
   setApiKey: (account: KeyAccount, key: string) => invoke<void>("set_api_key", { account, key }),
   hasApiKey: (account: KeyAccount) => invoke<boolean>("has_api_key", { account }),
   testNotesKey: () => invoke<void>("test_notes_key"),
-  modelStatus: (model: LocalModel) => invoke<boolean>("model_status", { model }),
-  downloadModel: (model: LocalModel) => invoke<void>("download_model", { model }),
+  modelStatus: () => invoke<boolean>("model_status"),
+  downloadModel: () => invoke<void>("download_model"),
   exportNote: (meetingId: number, path: string) => invoke<void>("export_note", { meetingId, path }),
   searchNotes: (filter: NotesFilter) => invoke<NotesPage>("search_notes", { filter }),
   listPeople: () => invoke<string[]>("list_people"),

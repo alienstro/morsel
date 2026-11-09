@@ -24,7 +24,7 @@ beforeEach(() => {
   responses.data_info = { path: DATA, notes: 48, bytes: 6 * 1024 * 1024 };
   responses.export_all = 3;
   responses.get_settings = {
-    notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "m", quickModel: "", transcribeMode: "local", localModel: "parakeet",
+    notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "m", quickModel: "", transcribeMode: "local",
     transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
   };
   responses.has_api_key = true;

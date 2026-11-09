@@ -106,8 +106,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     }
     let http = reqwest::Client::new();
     let secrets: Arc<dyn SecretStore> = Arc::new(KeychainStore);
-    // Each on-device model has its own folder in here.
+    // Whisper Turbo has its own folder in here. Older versions also put Parakeet here.
     let models_root = transcribe::model_download::models_root(&data_dir);
+    transcribe::model_download::remove_old_models(&models_root);
     let engines = Arc::new(RealEngines::new(
         models_root.clone(),
         http.clone(),

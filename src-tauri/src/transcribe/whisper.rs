@@ -5,7 +5,6 @@
 use super::model_download::model_ready;
 use super::{Transcriber, language_param};
 use crate::audio::PIPELINE_RATE;
-use crate::settings::LocalModel;
 use crate::types::{MorselError, Result};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineWhisperModelConfig};
 use std::path::Path;
@@ -19,7 +18,7 @@ impl WhisperTranscriber {
     /// Loads the model. `language` is a Whisper code such as "tl", or "auto" to detect it.
     /// sherpa-onnx sets the language when it loads the model, so a new language needs a new load.
     pub fn new(dir: &Path, language: &str) -> Result<Self> {
-        if !model_ready(dir, LocalModel::WhisperTurbo) {
+        if !model_ready(dir) {
             return Err(MorselError::Transcribe(
                 "the Whisper model is not downloaded".into(),
             ));
@@ -66,6 +65,7 @@ impl Transcriber for WhisperTranscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcribe::model_download;
 
     #[test]
     fn missing_model_dir_is_an_error() {
@@ -78,17 +78,12 @@ mod tests {
     #[ignore]
     async fn transcribes_the_fixture_with_the_real_model() {
         let home = std::env::var("HOME").expect("HOME");
-        let dir = LocalModel::WhisperTurbo.dir_in(&super::super::model_download::models_root(
+        let dir = model_download::model_dir(&model_download::models_root(
             &Path::new(&home).join("Library/Application Support/app.morsel"),
         ));
-        super::super::model_download::ensure_model(
-            &reqwest::Client::new(),
-            &dir,
-            LocalModel::WhisperTurbo,
-            |_, _| {},
-        )
-        .await
-        .unwrap();
+        model_download::ensure_model(&reqwest::Client::new(), &dir, |_, _| {})
+            .await
+            .unwrap();
         let t = WhisperTranscriber::new(&dir, "auto").unwrap();
         let bytes = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -106,5 +101,12 @@ mod tests {
         let text = t.transcribe(&samples, None).await.unwrap().to_lowercase();
         eprintln!("whisper: {:?} in {:?}", text, started.elapsed());
         assert!(text.contains("hello") && text.contains("test"), "{text}");
+        let thirty: Vec<f32> = samples.iter().cycle().take(16_000 * 30).copied().collect();
+        let started = std::time::Instant::now();
+        t.transcribe(&thirty, None).await.unwrap();
+        let took = started.elapsed();
+        eprintln!("whisper: 30 s chunk in {took:?}");
+        // Two streams need less than half of real time: 30 s of audio in less than 15 s.
+        assert!(took.as_secs_f32() < 15.0, "30 s chunk took {took:?}");
     }
 }
