@@ -128,3 +128,50 @@ describe("SettingsModelsScreen", () => {
     );
   });
 });
+
+describe("HomeScreen next meeting", () => {
+  const inMin = (m: number) => Date.now() + m * 60_000;
+  const event = (extra: Record<string, unknown> = {}) => ({
+    id: "e1", provider: "google", title: "Weekly product sync", start: inMin(6), end: inMin(36),
+    link: "https://meet.google.com/abc", people: ["Sam", "Priya", "Leo"], ...extra,
+  });
+
+  it("home_shows_the_next_meeting_card", async () => {
+    responses.upcoming_events = [event()];
+    renderAt("/");
+    expect(await screen.findByText("Weekly product sync")).toBeInTheDocument();
+    expect(screen.getByText(/Google Meet with Sam, Priya and Leo, in [56] min/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Meeting title (optional)")).not.toBeInTheDocument();
+  });
+
+  it("card_start_sends_title_and_people", async () => {
+    responses.upcoming_events = [event()];
+    responses.start_meeting = 42;
+    renderAt("/");
+    await screen.findByText("Weekly product sync");
+    fireEvent.change(screen.getByLabelText("Template"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /Start notes/ }));
+    expect(await screen.findByText("meeting page")).toBeInTheDocument();
+    const args = invoke.mock.calls.find(([c]) => c === "start_meeting")?.[1];
+    expect(args).toEqual({ title: "Weekly product sync", templateId: 3, people: ["Sam", "Priya", "Leo"] });
+  });
+
+  it("a_started_meeting_shows_now", async () => {
+    responses.upcoming_events = [event({ start: inMin(-3), link: null, people: [] })];
+    renderAt("/");
+    expect(await screen.findByText("Now")).toBeInTheDocument();
+  });
+
+  it("home_without_calendar_shows_the_plain_start", async () => {
+    responses.upcoming_events = [];
+    renderAt("/");
+    expect(await screen.findByPlaceholderText("Meeting title (optional)")).toBeInTheDocument();
+  });
+
+  it("unscheduled_link_shows_the_plain_start", async () => {
+    responses.upcoming_events = [event()];
+    renderAt("/");
+    fireEvent.click(await screen.findByRole("button", { name: "Start a note without the calendar" }));
+    expect(screen.getByPlaceholderText("Meeting title (optional)")).toBeInTheDocument();
+  });
+});

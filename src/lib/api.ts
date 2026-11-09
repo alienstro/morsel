@@ -47,7 +47,8 @@ export type LevelsEvent = { you: number; others: number };
 
 /** One function for each backend command. Arguments are camelCase; Tauri maps them to snake_case. */
 export const api = {
-  startMeeting: (title: string | null, templateId: number) => invoke<number>("start_meeting", { title, templateId }),
+  startMeeting: (title: string | null, templateId: number, people?: string[]) =>
+    invoke<number>("start_meeting", { title, templateId, people }),
   pauseMeeting: () => invoke<void>("pause_meeting"),
   resumeMeeting: () => invoke<void>("resume_meeting"),
   stopMeeting: () => invoke<void>("stop_meeting"),

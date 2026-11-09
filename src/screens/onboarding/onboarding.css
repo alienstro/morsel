@@ -24,4 +24,3 @@
 .onboard-section h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .calendar-panel { display: flex; flex-direction: column; gap: 12px; }
-.btn.btn-link { border: 0; background: transparent; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
