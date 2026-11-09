@@ -40,6 +40,9 @@ const COMMANDS: &[&str] = &[
     "disconnect_calendar",
     "refresh_calendar",
     "upcoming_events",
+    "reminder_event",
+    "start_from_reminder",
+    "dismiss_reminder",
 ];
 
 fn main() {

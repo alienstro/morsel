@@ -80,6 +80,9 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             calendar::service::disconnect_calendar,
             calendar::service::refresh_calendar,
             calendar::service::upcoming_events,
+            calendar::reminder::reminder_event,
+            calendar::reminder::start_from_reminder,
+            calendar::reminder::dismiss_reminder,
         ])
 }
 
@@ -113,6 +116,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         db, secrets, http, sink, engines, data_dir, model_dir,
     ));
     start_calendar_poll(calendar.clone());
+    app.manage(calendar::reminder::ReminderState::default());
+    calendar::reminder::start_reminder_loop(app.handle().clone());
     let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
         let from_calendar = event

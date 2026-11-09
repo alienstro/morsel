@@ -21,11 +21,17 @@ export function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** "Google Meet with Sam and Priya, in 6 min". The first letter is a capital. */
-export function eventLine(e: CalendarEvent, now: number): string {
+/** "Google Meet with Sam and Priya", "Zoom", "With Sam", or "". */
+export function eventWho(e: CalendarEvent): string {
   const place = meetingPlace(e.link);
   const people = joinNames(e.people);
-  const who = place && people ? `${place} with ${people}` : place ?? (people ? `With ${people}` : "");
+  if (place && people) return `${place} with ${people}`;
+  return place ?? (people ? `With ${people}` : "");
+}
+
+/** "Google Meet with Sam and Priya, in 6 min". The first letter is a capital. */
+export function eventLine(e: CalendarEvent, now: number): string {
+  const who = eventWho(e);
   const mins = Math.ceil((e.start - now) / 60_000);
   const when = e.start <= now ? "now" : mins < 60 ? `in ${mins} min` : "";
   const line = [who, when].filter(Boolean).join(", ");

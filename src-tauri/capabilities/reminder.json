@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reminder",
+  "description": "Capability for the meeting reminder window: it reads its event, starts the meeting, or closes",
+  "windows": [
+    "reminder"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-reminder-event",
+    "allow-start-from-reminder",
+    "allow-dismiss-reminder"
+  ]
+}

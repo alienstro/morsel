@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router";
-import { api } from "../lib/api";
+import { api, onOpenMeeting } from "../lib/api";
 import { MeetingScreen } from "../screens/meeting/MeetingScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NoteScreen } from "../screens/note/NoteScreen";
@@ -37,6 +37,18 @@ function ShellLayout() {
   );
 }
 
+/** Opens a meeting that the reminder or the global shortcut started. */
+function OpenMeetingListener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const off = onOpenMeeting(({ id }) => navigate(`/meeting/${id}`));
+    return () => {
+      off.then((f) => f());
+    };
+  }, [navigate]);
+  return null;
+}
+
 /** Sends a new user to the first-run screens. Shows nothing until the settings load. */
 function OnboardingGate() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
@@ -46,7 +58,14 @@ function OnboardingGate() {
   }, []);
 
   if (onboarded === null) return null;
-  return onboarded ? <Outlet /> : <Navigate to="/welcome/1" replace />;
+  return onboarded ? (
+    <>
+      <OpenMeetingListener />
+      <Outlet />
+    </>
+  ) : (
+    <Navigate to="/welcome/1" replace />
+  );
 }
 
 /** Screen routes. The meeting screen has its own meeting list, so it renders without the app shell. */

@@ -88,6 +88,9 @@ export const api = {
   disconnectCalendar: (provider: Provider) => invoke<void>("disconnect_calendar", { provider }),
   refreshCalendar: () => invoke<void>("refresh_calendar"),
   upcomingEvents: () => invoke<CalendarEvent[]>("upcoming_events"),
+  reminderEvent: () => invoke<CalendarEvent | null>("reminder_event"),
+  startFromReminder: () => invoke<number>("start_from_reminder"),
+  dismissReminder: () => invoke<void>("dismiss_reminder"),
 };
 
 function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -99,6 +102,7 @@ export const onLevels = (h: (levels: LevelsEvent) => void) => on("meeting://leve
 export const onStatus = (h: (status: StatusEvent) => void) => on("meeting://status", h);
 export const onNotesDone = (h: (e: { meetingId: number }) => void) => on("notes://done", h);
 export const onNotesFailed = (h: (e: { meetingId: number; message: string }) => void) => on("notes://failed", h);
+export const onOpenMeeting = (h: (e: { id: number }) => void) => on("app://open-meeting", h);
 export const onCalendarChanged = (h: () => void) => on("calendar://changed", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
 
