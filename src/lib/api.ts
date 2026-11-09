@@ -28,7 +28,10 @@ export type DataInfo = { path: string; notes: number; bytes: number };
 export type Settings = {
   notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
+  onboarded: boolean; remindBeforeMeeting: boolean; globalShortcut: string;
 };
+export type MicAccess = "allowed" | "denied" | "unknown";
+export type PrivacyPane = "microphone" | "audio_capture";
 export type KeyAccount = "notes_api_key" | "transcribe_api_key";
 export type MorselError = { code: string; message: string };
 
@@ -69,6 +72,9 @@ export const api = {
   dataInfo: () => invoke<DataInfo>("data_info"),
   exportAll: (dir: string) => invoke<number>("export_all", { dir }),
   deleteAllData: () => invoke<void>("delete_all_data"),
+  microphoneAccess: () => invoke<MicAccess>("microphone_access"),
+  requestMicrophone: () => invoke<MicAccess>("request_microphone"),
+  openPrivacySettings: (pane: PrivacyPane) => invoke<void>("open_privacy_settings", { pane }),
 };
 
 function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {
