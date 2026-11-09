@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
 import { api } from "../../lib/api";
+import { CalendarPanel } from "../calendar/CalendarPanel";
 import { OnboardingLayout } from "./OnboardingLayout";
 
 /** Screen 1.3: the optional calendar link. Finish and Skip both end the first run. */
@@ -26,6 +27,7 @@ export function CalendarStep() {
         </>
       }
     >
+      <CalendarPanel />
       <section className="onboard-section" aria-labelledby="ob-reads">
         <h2 id="ob-reads">What Morsel reads</h2>
         <p className="muted small" style={{ margin: 0 }}>

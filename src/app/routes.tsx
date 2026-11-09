@@ -9,6 +9,7 @@ import { WritingScreen } from "../screens/note/WritingScreen";
 import { AskScreen } from "../screens/ask/AskScreen";
 import { NotesScreen } from "../screens/notes/NotesScreen";
 import { SettingsLayout, SettingsPending } from "../screens/settings/SettingsLayout";
+import { SettingsCalendarScreen } from "../screens/settings/SettingsCalendarScreen";
 import { SettingsPrivacyScreen } from "../screens/settings/SettingsPrivacyScreen";
 import { TemplatesScreen } from "../screens/templates/TemplatesScreen";
 import { OnboardingScreen } from "../screens/onboarding/OnboardingScreen";
@@ -69,7 +70,7 @@ export function AppRoutes() {
         <Route path="/settings" element={<Navigate to="/settings/models" replace />} />
         <Route path="/settings/models" element={<SettingsModelsScreen />} />
         <Route path="/settings/privacy" element={<SettingsPrivacyScreen />} />
-        <Route path="/settings/calendar" element={<SettingsPending title="Calendar" />} />
+        <Route path="/settings/calendar" element={<SettingsCalendarScreen />} />
         <Route path="/settings/shortcuts" element={<SettingsPending title="Shortcuts" />} />
       </Route>
       </Route>
