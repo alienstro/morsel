@@ -2,7 +2,8 @@
 
 use crate::audio::{mic::MicSource, source::AudioSource, system_tap::SystemTapSource};
 use crate::db::SharedDb;
-use crate::db::meetings::{self, MeetingDetail, MeetingSummary, Template};
+use crate::db::meetings::{self, MeetingDetail, MeetingSummary};
+use crate::db::templates::{self, Template};
 use crate::events::{EventSink, MODEL_DOWNLOAD};
 use crate::llm::{self, LlmConfig};
 use crate::notes::writer::{CancellationToken, NotesContext};
@@ -196,7 +197,7 @@ impl AppState {
     }
 
     pub fn list_templates(&self) -> Result<Vec<Template>> {
-        meetings::list_templates(&self.conn())
+        templates::list(&self.conn())
     }
 
     pub fn save_settings(&self, value: &Settings) -> Result<()> {

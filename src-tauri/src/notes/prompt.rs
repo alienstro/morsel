@@ -1,6 +1,6 @@
 //! The messages that go to the notes model.
 
-use crate::db::meetings::Template;
+use crate::db::templates::Template;
 use crate::llm::ChatMessage;
 use crate::session::clock;
 use crate::types::TranscriptLine;
@@ -54,12 +54,23 @@ fn system_prompt(template: &Template) -> String {
     let headings: String = template
         .sections
         .iter()
-        .map(|s| format!("## {s}\n"))
+        .map(|s| format!("## {}\n", s.name))
         .collect();
+    let guide: String = template
+        .sections
+        .iter()
+        .filter(|s| !s.hint.is_empty())
+        .map(|s| format!("- {}: {}\n", s.name, s.hint))
+        .collect();
+    let guide = if guide.is_empty() {
+        String::new()
+    } else {
+        format!("What each section holds:\n{guide}")
+    };
     format!(
         "You write meeting notes in Markdown.\n\
          Use only facts from the rough notes and the transcript. Do not invent names, numbers or dates.\n\
-         Write these headings, one time each, in this order:\n{headings}\
+         Write these headings, one time each, in this order:\n{headings}{guide}\
          Copy each line of the rough notes word for word into the section where it fits. \
          Do not change, merge or drop those lines. Add the details from the transcript below them.\n\
          Write each action item as `- [ ] Owner: task`. If the owner is not known, write `- [ ] Unknown: task`.\n\
@@ -152,14 +163,24 @@ pub fn clean_title(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::templates::Section;
     use crate::types::Speaker;
 
     fn template() -> Template {
         Template {
             id: 1,
             name: "General".into(),
-            sections: vec!["Summary".into(), "Key points".into(), "Action items".into()],
+            description: String::new(),
+            sections: ["Summary", "Key points", "Action items"]
+                .into_iter()
+                .map(|name| Section {
+                    name: name.into(),
+                    hint: String::new(),
+                })
+                .collect(),
             instructions: "Be short.".into(),
+            built_in: true,
+            uses: 0,
         }
     }
 
@@ -220,5 +241,15 @@ mod tests {
                 .iter()
                 .all(|p| estimate_tokens(&transcript_text(p)) <= 300)
         );
+    }
+
+    #[test]
+    fn section_hints_show_in_the_system_prompt() {
+        let mut t = template();
+        t.sections[1].hint = "The main facts and ideas".into();
+        let system = &build_messages(&t, "", &[])[0].content;
+        assert!(system.contains("## Key points\n"));
+        assert!(system.contains("- Key points: The main facts and ideas"));
+        assert!(!system.contains("- Summary:"));
     }
 }

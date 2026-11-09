@@ -180,7 +180,7 @@ pub fn usage_since(conn: &Connection, since_ms: i64) -> Result<UsageTotal> {
 mod tests {
     use super::*;
     use crate::db::meetings::*;
-    use crate::db::{MIGRATIONS, open};
+    use crate::db::{migrations, open};
     use crate::types::{MeetingStatus, Speaker, TranscriptLine};
     use rusqlite::params;
 
@@ -393,7 +393,7 @@ mod tests {
         let path = dir.path().join("morsel.db");
         {
             let mut conn = Connection::open(&path).unwrap();
-            rusqlite_migration::Migrations::from_slice(&MIGRATIONS[..1])
+            rusqlite_migration::Migrations::new(migrations().into_iter().take(1).collect())
                 .to_latest(&mut conn)
                 .unwrap();
             conn.execute(

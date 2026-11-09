@@ -8,15 +8,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Template {
-    pub id: i64,
-    pub name: String,
-    pub sections: Vec<String>,
-    pub instructions: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MeetingSummary {
     pub id: MeetingId,
     pub title: String,
@@ -84,44 +75,8 @@ pub(crate) fn to_summary(raw: SummaryRow) -> Result<MeetingSummary> {
     })
 }
 
-fn template_from_row(row: &Row<'_>) -> rusqlite::Result<(i64, String, String, String)> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-}
-
-fn to_template(raw: (i64, String, String, String)) -> Result<Template> {
-    let sections = serde_json::from_str(&raw.2)
-        .map_err(|e| MorselError::Db(format!("template {} sections: {e}", raw.0)))?;
-    Ok(Template {
-        id: raw.0,
-        name: raw.1,
-        sections,
-        instructions: raw.3,
-    })
-}
-
-pub fn list_templates(conn: &Connection) -> Result<Vec<Template>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, sections_json, instructions FROM templates ORDER BY id")?;
-    let raws = stmt
-        .query_map([], template_from_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    raws.into_iter().map(to_template).collect()
-}
-
-pub fn get_template(conn: &Connection, id: i64) -> Result<Template> {
-    let raw = conn
-        .query_row(
-            "SELECT id, name, sections_json, instructions FROM templates WHERE id = ?1",
-            [id],
-            template_from_row,
-        )
-        .optional()?
-        .ok_or_else(|| MorselError::NotFound(format!("template {id}")))?;
-    to_template(raw)
-}
-
 pub fn create_meeting(conn: &Connection, title: &str, template_id: i64) -> Result<MeetingId> {
-    get_template(conn, template_id)?;
+    super::templates::get(conn, template_id)?;
     conn.execute(
         "INSERT INTO meetings (title, template_id, status, started_at) VALUES (?1, ?2, ?3, ?4)",
         params![

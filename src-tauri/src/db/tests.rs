@@ -1,4 +1,5 @@
 use super::meetings::*;
+use super::templates;
 use super::open;
 use crate::types::{MeetingStatus, Speaker, TranscriptLine};
 use rusqlite::Connection;
@@ -34,7 +35,7 @@ fn open_runs_migrations_twice_without_error() {
 #[test]
 fn seeds_five_templates() {
     let (_d, conn) = temp_db();
-    let names: Vec<String> = list_templates(&conn)
+    let names: Vec<String> = templates::list(&conn)
         .unwrap()
         .into_iter()
         .map(|t| t.name)
@@ -43,11 +44,9 @@ fn seeds_five_templates() {
         names,
         ["General", "1:1", "Sales call", "Stand-up", "Product sync"]
     );
-    let general = get_template(&conn, 1).unwrap();
-    assert_eq!(
-        general.sections,
-        ["Summary", "Key points", "Decisions", "Action items"]
-    );
+    let general = templates::get(&conn, 1).unwrap();
+    let sections: Vec<&str> = general.sections.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(sections, ["Summary", "Key points", "Decisions", "Action items"]);
 }
 
 #[test]
