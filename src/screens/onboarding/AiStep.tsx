@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { api, errorMessage, onModelDownload, type Settings } from "../../lib/api";
+import { api, errorMessage, type LocalModel, type Settings } from "../../lib/api";
+import { LOCAL_MODELS, useLocalModels } from "../../lib/localModels";
 import { OnboardingLayout } from "./OnboardingLayout";
 
 const OPENROUTER = "https://openrouter.ai/api/v1";
 const MB = 1_000_000;
-
-type Download = { received: number; total: number } | null;
 
 /** Screen 1.2: the transcription choice and the notes model. */
 export function AiStep() {
@@ -14,18 +13,12 @@ export function AiStep() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [notesKey, setNotesKey] = useState("");
   const [groqKey, setGroqKey] = useState("");
-  const [modelReady, setModelReady] = useState(false);
-  const [download, setDownload] = useState<Download>(null);
+  const models = useLocalModels();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.getSettings().then(setSettings).catch((e) => setMessage({ ok: false, text: errorMessage(e) }));
-    api.modelStatus().then(setModelReady).catch(() => {});
-    const off = onModelDownload((e) => setDownload(e));
-    return () => {
-      off.then((f) => f());
-    };
   }, []);
 
   if (!settings) return null;
@@ -63,23 +56,15 @@ export function AiStep() {
     }
   };
 
-  const startDownload = async () => {
-    setDownload({ received: 0, total: 0 });
-    try {
-      await api.downloadModel();
-      setModelReady(true);
-    } catch (e) {
-      setMessage({ ok: false, text: errorMessage(e) });
-    } finally {
-      setDownload(null);
-    }
-  };
+  const pickLocal = (model: LocalModel) => setSettings({ ...settings, transcribeMode: "local", localModel: model });
 
-  const localState = modelReady
-    ? "Ready"
-    : download
-      ? download.total > 0 ? `Downloading, ${Math.floor(download.received / MB)} of ${Math.floor(download.total / MB)} MB` : "Downloading…"
-      : null;
+  /** The state line of the selected local model, or null when it still needs a download. */
+  const localState = (model: LocalModel) => {
+    if (models.ready[model]) return "Ready";
+    if (models.downloading !== model) return null;
+    const p = models.progress;
+    return p && p.total > 0 ? `Downloading, ${Math.floor(p.received / MB)} of ${Math.floor(p.total / MB)} MB` : "Downloading…";
+  };
 
   return (
     <OnboardingLayout
@@ -96,16 +81,25 @@ export function AiStep() {
       <section className="onboard-section" aria-labelledby="ob-transcription">
         <h2 id="ob-transcription">Transcription</h2>
         <div className="choice-list" role="radiogroup" aria-labelledby="ob-transcription">
-          <label className={`choice${settings.transcribeMode === "local" ? " selected" : ""}`}>
-            <input type="radio" name="tx" checked={settings.transcribeMode === "local"} onChange={() => set("transcribeMode", "local")} />
-            <span>
-              <span className="choice-title">On this Mac</span>
-              <span className="muted small" style={{ display: "block" }}>Parakeet, free, audio never leaves your Mac. 25 European languages, not Tagalog</span>
-              {settings.transcribeMode === "local" && (localState
-                ? <span className="small" style={{ display: "block" }}>{localState}</span>
-                : <button type="button" className="btn" style={{ marginTop: 6 }} onClick={startDownload}>Download the model</button>)}
-            </span>
-          </label>
+          {(Object.keys(LOCAL_MODELS) as LocalModel[]).map((model) => {
+            const selected = settings.transcribeMode === "local" && settings.localModel === model;
+            const state = localState(model);
+            return (
+              <label key={model} className={`choice${selected ? " selected" : ""}`}>
+                <input type="radio" name="tx" checked={selected} onChange={() => pickLocal(model)} />
+                <span>
+                  <span className="choice-title">On this Mac: {LOCAL_MODELS[model].name}</span>
+                  <span className="muted small" style={{ display: "block" }}>
+                    Free, audio never leaves your Mac. {LOCAL_MODELS[model].about}
+                  </span>
+                  {selected && (state
+                    ? <span className="small" style={{ display: "block" }}>{state}</span>
+                    : <button type="button" className="btn" style={{ marginTop: 6 }} disabled={models.downloading !== null} onClick={() => models.download(model)}>Download the model</button>)}
+                  {selected && models.error && <span role="alert" className="error-text small" style={{ display: "block" }}>{models.error}</span>}
+                </span>
+              </label>
+            );
+          })}
           <label className={`choice${settings.transcribeMode === "cloud" ? " selected" : ""}`}>
             <input type="radio" name="tx" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} />
             <span>

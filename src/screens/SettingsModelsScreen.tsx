@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, onModelDownload, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
+import { api, errorMessage, type KeyAccount, type LocalModel, type Settings, type UsageTotal } from "../lib/api";
+import { LOCAL_MODELS, useLocalModels } from "../lib/localModels";
 import "./note/note.css";
 
 type KeyFieldProps = { account: KeyAccount; label: string };
@@ -50,19 +51,12 @@ export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
-  const [modelReady, setModelReady] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const models = useLocalModels();
   const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
     api.usageSummary().then(setUsage).catch(() => {});
     api.getSettings().then(setSettings).catch((e) => setMessage(errorMessage(e)));
-    api.modelStatus().then(setModelReady).catch(() => {});
-    const off = onModelDownload(({ received, total }) => total > 0 && setProgress(Math.floor((received / total) * 100)));
-    return () => {
-      off.then((f) => f());
-    };
   }, []);
 
   if (!settings) return <p className="muted page">{message ?? "Loading the settings…"}</p>;
@@ -86,19 +80,6 @@ export function SettingsModelsScreen() {
       setKeyMessage("The key works.");
     } catch (e) {
       setKeyMessage(errorMessage(e));
-    }
-  };
-
-  const download = async () => {
-    setDownloadError(null);
-    setProgress(0);
-    try {
-      await api.downloadModel();
-      setModelReady(true);
-      setProgress(null);
-    } catch (e) {
-      setDownloadError(errorMessage(e));
-      setProgress(null);
     }
   };
 
@@ -136,19 +117,11 @@ export function SettingsModelsScreen() {
           <label><input type="radio" name="mode" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} /> Cloud (your key)</label>
         </fieldset>
         {settings.transcribeMode === "local" ? (
-          <div className="field">
-            <span>Parakeet model (about 670 MB): {modelReady ? "ready" : "not downloaded"}</span>
-            {!modelReady && progress === null && (
-              <button type="button" className="btn" onClick={download}>Download the model</button>
-            )}
-            {progress !== null && (
-              <>
-                <progress max={100} value={progress} />
-                <span className="small">Downloading: {progress}%</span>
-              </>
-            )}
-            {downloadError && <span role="alert" className="error-text small">{downloadError}</span>}
-          </div>
+          <LocalModelField
+            model={settings.localModel}
+            onModel={(m) => set("localModel", m)}
+            models={models}
+          />
         ) : (
           <>
             <div className="field">
@@ -173,5 +146,39 @@ export function SettingsModelsScreen() {
         {message && <span role="status" className="small">{message}</span>}
       </div>
     </form>
+  );
+}
+
+/** The on-device model choice, its download state, and the download button. */
+function LocalModelField({ model, onModel, models }: {
+  model: LocalModel;
+  onModel: (m: LocalModel) => void;
+  models: ReturnType<typeof useLocalModels>;
+}) {
+  const info = LOCAL_MODELS[model];
+  const p = models.downloading === model ? models.progress : null;
+  const percent = p && p.total > 0 ? Math.floor((p.received / p.total) * 100) : p ? 0 : null;
+  return (
+    <div className="field">
+      <fieldset className="row">
+        <legend className="sr-only">On-device model</legend>
+        {(Object.keys(LOCAL_MODELS) as LocalModel[]).map((m) => (
+          <label key={m}>
+            <input type="radio" name="local-model" checked={model === m} onChange={() => onModel(m)} /> {LOCAL_MODELS[m].name} ({LOCAL_MODELS[m].about})
+          </label>
+        ))}
+      </fieldset>
+      <span>{info.name} model ({info.size}): {models.ready[model] ? "ready" : "not downloaded"}</span>
+      {!models.ready[model] && percent === null && (
+        <button type="button" className="btn" disabled={models.downloading !== null} onClick={() => models.download(model)}>Download the model</button>
+      )}
+      {percent !== null && (
+        <>
+          <progress max={100} value={percent} />
+          <span className="small">Downloading: {percent}%</span>
+        </>
+      )}
+      {models.error && <span role="alert" className="error-text small">{models.error}</span>}
+    </div>
   );
 }

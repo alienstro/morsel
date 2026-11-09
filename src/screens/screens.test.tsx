@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../test/ta
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local",
+  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", localModel: "parakeet",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
 };
 
@@ -117,6 +117,19 @@ describe("SettingsModelsScreen", () => {
     act(() => emit("model://download", { received: 335_000_000, total: 670_000_000 }));
     expect(await screen.findByText("Downloading: 50%")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("value", "50");
+  });
+
+  it("settings_whisper_model_downloads_whisper_and_saves_it", async () => {
+    responses.download_model = () => new Promise(() => {});
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("radio", { name: /^Whisper Turbo/ }));
+    expect(screen.getByText(/Whisper Turbo model \(about 1 GB\): not downloaded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download the model" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("download_model", { model: "whisper_turbo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("save_settings", { settings: { ...settings, localModel: "whisper_turbo" } }),
+    );
   });
 
   it("save_settings_sends_the_form", async () => {
