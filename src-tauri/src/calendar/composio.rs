@@ -49,7 +49,10 @@ impl<'a> Composio<'a> {
             .await
             .map_err(|e| MorselError::Http(e.without_url().to_string()))?;
         if !status.is_success() {
-            return Err(status_error(status, &body));
+            return Err(match status_error(status, &body) {
+                MorselError::InvalidKey => MorselError::InvalidComposioKey,
+                other => other,
+            });
         }
         if body.trim().is_empty() {
             return Ok(Value::Null);
@@ -298,7 +301,25 @@ mod tests {
         assert!(err.to_string().contains("token expired"), "{err}");
         assert!(matches!(
             c.create_auth_config(Provider::Outlook).await,
-            Err(MorselError::InvalidKey)
+            Err(MorselError::InvalidComposioKey)
         ));
+    }
+
+    #[tokio::test]
+    async fn refused_key_names_the_key_that_composio_needs() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth_configs"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let err = Composio::new(&http, &server.uri(), "bad")
+            .create_auth_config(Provider::Google)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "invalid_key");
+        assert!(err.to_string().contains("project API key"), "{err}");
+        assert!(err.to_string().contains("Project Settings"), "{err}");
     }
 }

@@ -47,6 +47,15 @@ describe("CalendarPanel", () => {
     expect(screen.getByLabelText("Composio key")).toHaveValue("");
   });
 
+  it("user_api_key_is_refused_with_help", async () => {
+    renderStep();
+    await screen.findByRole("button", { name: "Connect Google Calendar" });
+    fireEvent.change(screen.getByLabelText("Composio key"), { target: { value: "uak_123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This is a Composio user key. Morsel needs a project API key");
+    expect(calls("set_api_key")).toEqual([]);
+  });
+
   it("connect_calls_the_backend", async () => {
     responses.calendar_status = { hasKey: true, google: none, outlook: none };
     renderStep();

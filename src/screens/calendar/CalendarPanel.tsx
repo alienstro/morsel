@@ -32,6 +32,11 @@ export function CalendarPanel() {
   const saveKey = async (e: FormEvent) => {
     e.preventDefault();
     if (!key.trim()) return;
+    // Composio refuses a user key (uak_) in the header that Morsel sends, so stop it here with the fix.
+    if (key.trim().startsWith("uak_")) {
+      setError("This is a Composio user key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys.");
+      return;
+    }
     setError(null);
     try {
       await api.setApiKey("composio_api_key", key.trim());

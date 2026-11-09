@@ -97,6 +97,9 @@ pub enum MorselError {
     Invalid(String),
     #[error("the API key is not valid")]
     InvalidKey,
+    /// Composio has several kinds of key, and only a project key works for Morsel.
+    #[error("Composio did not accept this key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys.")]
+    InvalidComposioKey,
     #[error("the provider rate limit is reached")]
     RateLimit,
     #[error("network or provider error: {0}")]
@@ -132,7 +135,7 @@ impl MorselError {
             MorselError::Db(_) => "db",
             MorselError::NotFound(_) => "not_found",
             MorselError::Invalid(_) => "invalid",
-            MorselError::InvalidKey => "invalid_key",
+            MorselError::InvalidKey | MorselError::InvalidComposioKey => "invalid_key",
             MorselError::RateLimit => "rate_limit",
             MorselError::Http(_) => "http",
             MorselError::MicPermissionDenied => "mic_permission_denied",
