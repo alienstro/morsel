@@ -129,6 +129,16 @@ describe("SettingsModelsScreen", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("download_model"));
   });
 
+  it("settings_saves_the_after_timing", async () => {
+    renderAt("/settings/models");
+    expect(await screen.findByRole("radio", { name: /^While the meeting runs/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /^After the meeting/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("save_settings", { settings: { ...settings, transcribeTiming: "after" } }),
+    );
+  });
+
   it("save_settings_sends_the_form", async () => {
     renderAt("/settings/models");
     fireEvent.change(await screen.findByLabelText("Notes model"), { target: { value: "anthropic/model" } });

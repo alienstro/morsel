@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { api, errorMessage, type Settings } from "../../lib/api";
 import { LOCAL_MODEL, useLocalModel } from "../../lib/localModel";
+import { TIMING_CHOICES } from "../../lib/transcribeTiming";
 import { OnboardingLayout } from "./OnboardingLayout";
 
 const OPENROUTER = "https://openrouter.ai/api/v1";
@@ -109,6 +110,24 @@ export function AiStep() {
             <input id="ob-groq" type="password" className="text-input" autoComplete="off" value={groqKey} onChange={(e) => setGroqKey(e.target.value)} />
           </div>
         )}
+      </section>
+
+      <section className="onboard-section" aria-labelledby="ob-timing">
+        <h2 id="ob-timing">When to transcribe</h2>
+        <div className="choice-list" role="radiogroup" aria-labelledby="ob-timing">
+          {TIMING_CHOICES.map((choice) => {
+            const selected = settings.transcribeTiming === choice.value;
+            return (
+              <label key={choice.value} className={`choice${selected ? " selected" : ""}`}>
+                <input type="radio" name="timing" checked={selected} onChange={() => set("transcribeTiming", choice.value)} />
+                <span>
+                  <span className="choice-title">{choice.title}</span>
+                  <span className="muted small" style={{ display: "block" }}>{choice.about}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
       </section>
 
       <section className="onboard-section" aria-labelledby="ob-notes">

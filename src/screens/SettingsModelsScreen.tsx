@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
 import { LOCAL_MODEL, useLocalModel } from "../lib/localModel";
+import { TIMING_CHOICES } from "../lib/transcribeTiming";
 import "./note/note.css";
 
 type KeyFieldProps = { account: KeyAccount; label: string };
@@ -131,6 +132,15 @@ export function SettingsModelsScreen() {
             <KeyField account="transcribe_api_key" label="Transcription API key" />
           </>
         )}
+        <fieldset className="field">
+          <legend>When to transcribe</legend>
+          {TIMING_CHOICES.map((choice) => (
+            <label key={choice.value}>
+              <input type="radio" name="timing" checked={settings.transcribeTiming === choice.value} onChange={() => set("transcribeTiming", choice.value)} />{" "}
+              {choice.title}: <span className="muted small">{choice.about}</span>
+            </label>
+          ))}
+        </fieldset>
         <div className="field">
           <label htmlFor="language">Meeting language ("auto" detects it)</label>
           <input id="language" className="text-input" value={settings.language} onChange={(e) => set("language", e.target.value)} />

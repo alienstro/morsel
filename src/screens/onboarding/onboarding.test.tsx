@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
@@ -82,7 +82,7 @@ describe("AI step", () => {
     renderAt("/welcome/2");
     expect(await screen.findByRole("radio", { name: /^On this Mac: Whisper Turbo.*Tagalog too/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^Cloud.*Tagalog too/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(within(screen.getByRole("radiogroup", { name: "Transcription" })).getAllByRole("radio")).toHaveLength(2);
     expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
@@ -106,6 +106,14 @@ describe("AI step", () => {
     expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "custom" } });
     expect(screen.getByLabelText("Base URL")).toHaveValue("");
+  });
+
+  it("ai_step_saves_the_after_timing", async () => {
+    renderAt("/welcome/2");
+    expect(await screen.findByRole("radio", { name: /^While the meeting runs/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /^After the meeting.*about 20 minutes/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(calls("save_settings")[0]).toMatchObject({ settings: { transcribeTiming: "after" } }));
   });
 
   it("ai_step_shows_download_progress", async () => {
