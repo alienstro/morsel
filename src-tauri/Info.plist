@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Morsel records your voice during a meeting to make the transcript.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Morsel records the sound of the other people in your call to make the transcript.</string>
+</dict>
+</plist>

@@ -1,0 +1,68 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export type Speaker = "you" | "others";
+export type MeetingStatus =
+  | "recording" | "paused" | "stopped" | "writing_notes" | "done"
+  | "notes_cancelled" | "notes_failed" | "interrupted";
+
+export type TranscriptLine = { meetingId: number; speaker: Speaker; startMs: number; endMs: number; text: string };
+export type MeetingSummary = {
+  id: number; title: string; templateId: number; templateName: string; status: MeetingStatus; startedAt: number;
+};
+export type MeetingDetail = { summary: MeetingSummary; lines: TranscriptLine[]; userNotes: string; note: string | null };
+export type Template = { id: number; name: string; sections: string[]; instructions: string };
+export type Settings = {
+  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
+  transcribeBaseUrl: string; transcribeModel: string; language: string;
+};
+export type KeyAccount = "notes_api_key" | "transcribe_api_key";
+export type MorselError = { code: string; message: string };
+
+export type StatusEvent = { meetingId: number; status: MeetingStatus; warning: string | null };
+export type LevelsEvent = { you: number; others: number };
+
+/** One function for each backend command. Arguments are camelCase; Tauri maps them to snake_case. */
+export const api = {
+  startMeeting: (title: string | null, templateId: number) => invoke<number>("start_meeting", { title, templateId }),
+  pauseMeeting: () => invoke<void>("pause_meeting"),
+  resumeMeeting: () => invoke<void>("resume_meeting"),
+  stopMeeting: () => invoke<void>("stop_meeting"),
+  saveUserNotes: (meetingId: number, body: string) => invoke<void>("save_user_notes", { meetingId, body }),
+  writeNotes: (meetingId: number, templateId: number) => invoke<void>("write_notes", { meetingId, templateId }),
+  cancelNotes: (meetingId: number) => invoke<boolean>("cancel_notes", { meetingId }),
+  getMeeting: (meetingId: number) => invoke<MeetingDetail>("get_meeting", { meetingId }),
+  listMeetings: (limit: number) => invoke<MeetingSummary[]>("list_meetings", { limit }),
+  listTemplates: () => invoke<Template[]>("list_templates"),
+  getSettings: () => invoke<Settings>("get_settings"),
+  saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
+  setApiKey: (account: KeyAccount, key: string) => invoke<void>("set_api_key", { account, key }),
+  hasApiKey: (account: KeyAccount) => invoke<boolean>("has_api_key", { account }),
+  testNotesKey: () => invoke<void>("test_notes_key"),
+  modelStatus: () => invoke<boolean>("model_status"),
+  downloadModel: () => invoke<void>("download_model"),
+  exportNote: (meetingId: number, path: string) => invoke<void>("export_note", { meetingId, path }),
+};
+
+function on<T>(name: string, handler: (payload: T) => void): Promise<UnlistenFn> {
+  return listen<T>(name, (event) => handler(event.payload));
+}
+
+export const onTranscript = (h: (line: TranscriptLine) => void) => on("meeting://transcript", h);
+export const onLevels = (h: (levels: LevelsEvent) => void) => on("meeting://levels", h);
+export const onStatus = (h: (status: StatusEvent) => void) => on("meeting://status", h);
+export const onNotesDone = (h: (e: { meetingId: number }) => void) => on("notes://done", h);
+export const onNotesFailed = (h: (e: { meetingId: number; message: string }) => void) => on("notes://failed", h);
+export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
+
+/** The text to show for any error from a command. */
+export function errorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "message" in error) return String((error as MorselError).message);
+  return String(error);
+}
+
+/** `m:ss` from milliseconds. */
+export function clock(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}

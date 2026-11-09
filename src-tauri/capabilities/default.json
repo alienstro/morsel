@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-start-meeting",
+    "allow-pause-meeting",
+    "allow-resume-meeting",
+    "allow-stop-meeting",
+    "allow-save-user-notes",
+    "allow-get-meeting",
+    "allow-list-meetings",
+    "allow-list-templates",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-set-api-key",
+    "allow-has-api-key",
+    "allow-test-notes-key",
+    "allow-model-status",
+    "allow-download-model",
+    "allow-write-notes",
+    "allow-cancel-notes",
+    "allow-export-note",
+    "dialog:allow-save"
+  ]
+}

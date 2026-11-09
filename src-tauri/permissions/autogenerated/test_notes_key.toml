@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-test-notes-key"
+description = "Enables the test_notes_key command without any pre-configured scope."
+commands.allow = ["test_notes_key"]
+
+[[permission]]
+identifier = "deny-test-notes-key"
+description = "Denies the test_notes_key command without any pre-configured scope."
+commands.deny = ["test_notes_key"]
