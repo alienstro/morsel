@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local",
+  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
   onboarded: false, remindBeforeMeeting: true, globalShortcut: "CommandOrControl+Shift+M",
 };

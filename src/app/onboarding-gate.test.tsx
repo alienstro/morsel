@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../test/ta
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../test/tauri")).listen }));
 
 const base = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local",
+  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
   transcribeBaseUrl: "", transcribeModel: "", language: "auto", remindBeforeMeeting: true,
   globalShortcut: "CommandOrControl+Shift+M",
 };

@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Speaker = "you" | "others";
 export type MeetingStatus =
-  | "recording" | "paused" | "stopped" | "writing_notes" | "done"
+  | "recording" | "paused" | "stopped" | "transcribing" | "writing_notes" | "done"
   | "notes_cancelled" | "notes_failed" | "interrupted";
 
 export type TranscriptLine = { meetingId: number; speaker: Speaker; startMs: number; endMs: number; text: string };
@@ -26,7 +26,7 @@ export type AskAnswer = { id: number | null; question: string; answer: string; s
 export type UsageTotal = { promptTokens: number; completionTokens: number; cost: number | null };
 export type DataInfo = { path: string; notes: number; bytes: number };
 export type Settings = {
-  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
+  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud"; transcribeTiming: "live" | "after";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
   onboarded: boolean; remindBeforeMeeting: boolean; globalShortcut: string;
 };

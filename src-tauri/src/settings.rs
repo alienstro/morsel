@@ -13,6 +13,17 @@ pub enum TranscribeMode {
     Cloud,
 }
 
+/// When Morsel transcribes a meeting. `After` keeps the CPU free for the call app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscribeTiming {
+    /// While the meeting runs.
+    #[default]
+    Live,
+    /// From the saved audio, after the meeting stops.
+    After,
+}
+
 /// Settings never hold an API key. Keys live in the Keychain (see `secrets`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -22,6 +33,7 @@ pub struct Settings {
     pub quick_model: String,
     /// `Local` uses Whisper Turbo on this Mac. `Cloud` uses the endpoint below.
     pub transcribe_mode: TranscribeMode,
+    pub transcribe_timing: TranscribeTiming,
     pub transcribe_base_url: String,
     pub transcribe_model: String,
     pub language: String,
@@ -42,6 +54,7 @@ impl Default for Settings {
             notes_model: String::new(),
             quick_model: String::new(),
             transcribe_mode: TranscribeMode::Local,
+            transcribe_timing: TranscribeTiming::Live,
             transcribe_base_url: "https://api.groq.com/openai/v1".into(),
             transcribe_model: "whisper-large-v3-turbo".into(),
             language: "auto".into(),
@@ -96,6 +109,18 @@ mod tests {
         assert_eq!(old.transcribe_mode, TranscribeMode::Local);
         let json = serde_json::to_string(&old).unwrap();
         assert!(!json.contains("localModel"), "{json}");
+    }
+
+    #[test]
+    fn old_settings_default_to_live_timing() {
+        let old: Settings = serde_json::from_str(r#"{"transcribeMode":"local"}"#).unwrap();
+        assert_eq!(old.transcribe_timing, TranscribeTiming::Live);
+        let after = Settings {
+            transcribe_timing: TranscribeTiming::After,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&after).unwrap();
+        assert!(json.contains(r#""transcribeTiming":"after""#), "{json}");
     }
 
     #[test]

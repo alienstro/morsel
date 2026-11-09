@@ -42,6 +42,8 @@ pub enum MeetingStatus {
     Recording,
     Paused,
     Stopped,
+    /// After mode: Morsel transcribes the saved audio.
+    Transcribing,
     WritingNotes,
     Done,
     NotesCancelled,
@@ -55,6 +57,7 @@ impl MeetingStatus {
             MeetingStatus::Recording => "recording",
             MeetingStatus::Paused => "paused",
             MeetingStatus::Stopped => "stopped",
+            MeetingStatus::Transcribing => "transcribing",
             MeetingStatus::WritingNotes => "writing_notes",
             MeetingStatus::Done => "done",
             MeetingStatus::NotesCancelled => "notes_cancelled",
@@ -181,3 +184,17 @@ impl From<std::io::Error> for MorselError {
 }
 
 pub type Result<T, E = MorselError> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcribing_status_round_trips() {
+        assert_eq!(MeetingStatus::Transcribing.as_str(), "transcribing");
+        assert_eq!(
+            MeetingStatus::parse("transcribing").unwrap(),
+            MeetingStatus::Transcribing
+        );
+    }
+}
