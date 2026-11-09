@@ -100,7 +100,7 @@ export function AiStep() {
             <input type="radio" name="tx" checked={settings.transcribeMode === "local"} onChange={() => set("transcribeMode", "local")} />
             <span>
               <span className="choice-title">On this Mac</span>
-              <span className="muted small" style={{ display: "block" }}>Parakeet, free, audio never leaves your Mac</span>
+              <span className="muted small" style={{ display: "block" }}>Parakeet, free, audio never leaves your Mac. 25 European languages, not Tagalog</span>
               {settings.transcribeMode === "local" && (localState
                 ? <span className="small" style={{ display: "block" }}>{localState}</span>
                 : <button type="button" className="btn" style={{ marginTop: 6 }} onClick={startDownload}>Download the model</button>)}
@@ -110,7 +110,7 @@ export function AiStep() {
             <input type="radio" name="tx" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} />
             <span>
               <span className="choice-title">Cloud</span>
-              <span className="muted small" style={{ display: "block" }}>Groq Whisper Turbo, about $0.04 for each hour, needs a Groq key</span>
+              <span className="muted small" style={{ display: "block" }}>Groq Whisper Turbo, about $0.04 for each hour, needs a Groq key. Most languages, Tagalog too</span>
             </span>
           </label>
         </div>

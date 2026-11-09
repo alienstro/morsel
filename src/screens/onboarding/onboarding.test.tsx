@@ -78,6 +78,12 @@ describe("Welcome step", () => {
 });
 
 describe("AI step", () => {
+  it("transcription_options_name_their_languages", async () => {
+    renderAt("/welcome/2");
+    expect(await screen.findByText(/25 European languages, not Tagalog/)).toBeInTheDocument();
+    expect(screen.getByText(/Most languages, Tagalog too/)).toBeInTheDocument();
+  });
+
   it("ai_step_saves_settings_then_tests_the_connection", async () => {
     responses.test_notes_key = null;
     renderAt("/welcome/2");
