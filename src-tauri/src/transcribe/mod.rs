@@ -40,7 +40,7 @@ pub async fn transcribe_with_retry(
     None
 }
 
-/// A 16-bit PCM WAV file in memory. Audio never goes to disk.
+/// A 16-bit PCM WAV file in memory, for the cloud request. The saved meeting audio is in `audio::recording`.
 pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);

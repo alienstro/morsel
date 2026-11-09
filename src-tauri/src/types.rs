@@ -82,7 +82,7 @@ pub struct TranscriptLine {
     pub text: String,
 }
 
-/// 16 kHz mono audio of one speaker. It stays in memory only.
+/// 16 kHz mono audio of one speaker, ready for the transcriber.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioChunk {
     pub speaker: Speaker,

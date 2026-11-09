@@ -13,7 +13,7 @@ Morsel never joins the call. The other people see nothing in the call.
 ## 2. Users and cost
 
 - Morsel is for the owner and for other people. Each user brings their own API keys (BYOK). Morsel has no server and no bill of its own.
-- The default cost of a 1-hour meeting is $0 for the transcript (local Parakeet) plus the cost of the notes model of the user.
+- The default cost of a 1-hour meeting is $0 for the transcript (local Whisper Turbo) plus the cost of the notes model of the user.
 
 ## 3. Platform
 
@@ -50,7 +50,7 @@ React screens ──invoke()──▶ Tauri commands ──▶ MeetingSession
 ```
 
 - Two audio streams stay separate: "You" (microphone) and "Others" (system audio). The speaker label of a transcript line comes from its stream.
-- Morsel keeps audio only in memory. Morsel never writes audio to disk. A chunk is dropped after its transcript is saved.
+- Morsel saves the audio of each meeting on the Mac, in `<app data>/audio/<meeting id>/`, and the user can delete it (changed on 2026-11-10, see `2026-11-10-transcribe-timing-design.md`). Audio never leaves the Mac in local mode.
 
 ## 6. Audio
 
@@ -66,7 +66,7 @@ React screens ──invoke()──▶ Tauri commands ──▶ MeetingSession
 - A chunk that is all silence is dropped. It is not sent to a transcriber.
 - 10 seconds is the minimum because Groq bills each request for at least 10 seconds.
 - `Transcriber` has two implementations:
-  - **Local (default):** Parakeet TDT 0.6B v3, int8, through `sherpa-onnx`. Morsel downloads the model on first run, shows the progress, and checks a pinned SHA-256.
+  - **Local (default):** Whisper large-v3-turbo, int8, through `sherpa-onnx` (Parakeet was removed on 2026-11-10). Morsel downloads the model on first run, shows the progress, and checks a pinned SHA-256.
   - **Cloud:** any OpenAI-compatible `POST /audio/transcriptions`. The suggested default is Groq, base URL `https://api.groq.com/openai/v1`, model `whisper-large-v3-turbo` (about $0.04 for each hour).
 - The user sets the meeting language in Settings. The default is "auto".
 
