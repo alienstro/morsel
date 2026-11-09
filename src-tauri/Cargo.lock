@@ -2715,6 +2715,7 @@ dependencies = [
  "cpal",
  "hex",
  "keyring",
+ "libc",
  "objc2",
  "objc2-av-foundation",
  "objc2-core-audio",

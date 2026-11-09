@@ -39,6 +39,7 @@ sherpa-onnx = "2.0.1"
 sha2 = "0.11.1"
 hex = "0.4.3"
 tokio-util = "0.7.20"
+libc = "0.2.191"
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-opener = "2"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }

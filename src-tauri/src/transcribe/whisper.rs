@@ -8,10 +8,14 @@ use crate::audio::PIPELINE_RATE;
 use crate::types::{MorselError, Result};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineWhisperModelConfig};
 use std::path::Path;
-use std::sync::Arc;
 
+/// One transcription request for the worker thread.
+type Job = (Vec<f32>, tokio::sync::oneshot::Sender<String>);
+
+/// Whisper runs on its own thread with the macOS QoS class `utility`. The onnxruntime threads take
+/// the class of the thread that loads the model, so the call app gets the CPU first.
 pub struct WhisperTranscriber {
-    recognizer: Arc<OfflineRecognizer>,
+    jobs: std::sync::mpsc::Sender<Job>,
 }
 
 impl WhisperTranscriber {
@@ -23,42 +27,72 @@ impl WhisperTranscriber {
                 "the Whisper model is not downloaded".into(),
             ));
         }
-        let path = |name: &str| Some(dir.join(name).to_string_lossy().into_owned());
-        let mut config = OfflineRecognizerConfig::default();
-        config.model_config.whisper = OfflineWhisperModelConfig {
-            encoder: path("turbo-encoder.int8.onnx"),
-            decoder: path("turbo-decoder.int8.onnx"),
-            language: language_param(Some(language)).map(str::to_owned),
-            task: Some("transcribe".into()),
-            ..Default::default()
-        };
-        config.model_config.tokens = path("turbo-tokens.txt");
-        config.model_config.num_threads = 4;
-        let recognizer = OfflineRecognizer::create(&config).ok_or_else(|| {
-            MorselError::Transcribe("sherpa-onnx cannot load the Whisper model".into())
-        })?;
-        Ok(Self {
-            recognizer: Arc::new(recognizer),
-        })
+        let config = recognizer_config(dir, language);
+        let (jobs, inbox) = std::sync::mpsc::channel::<Job>();
+        let (loaded_tx, loaded) = std::sync::mpsc::channel::<bool>();
+        std::thread::Builder::new()
+            .name("whisper".into())
+            .spawn(move || {
+                set_utility_qos();
+                let Some(recognizer) = OfflineRecognizer::create(&config) else {
+                    let _ = loaded_tx.send(false);
+                    return;
+                };
+                let _ = loaded_tx.send(true);
+                while let Ok((samples, reply)) = inbox.recv() {
+                    let stream = recognizer.create_stream();
+                    stream.accept_waveform(PIPELINE_RATE as i32, &samples);
+                    recognizer.decode(&stream);
+                    let text = stream
+                        .get_result()
+                        .map(|r| r.text.trim().to_owned())
+                        .unwrap_or_default();
+                    let _ = reply.send(text);
+                }
+            })?;
+        if !loaded.recv().unwrap_or(false) {
+            return Err(MorselError::Transcribe(
+                "sherpa-onnx cannot load the Whisper model".into(),
+            ));
+        }
+        Ok(Self { jobs })
+    }
+}
+
+fn recognizer_config(dir: &Path, language: &str) -> OfflineRecognizerConfig {
+    let path = |name: &str| Some(dir.join(name).to_string_lossy().into_owned());
+    let mut config = OfflineRecognizerConfig::default();
+    config.model_config.whisper = OfflineWhisperModelConfig {
+        encoder: path("turbo-encoder.int8.onnx"),
+        decoder: path("turbo-decoder.int8.onnx"),
+        language: language_param(Some(language)).map(str::to_owned),
+        task: Some("transcribe".into()),
+        ..Default::default()
+    };
+    config.model_config.tokens = path("turbo-tokens.txt");
+    config.model_config.num_threads = 4;
+    config
+}
+
+/// Gives the current thread the macOS QoS class `utility`. Other systems keep their default.
+fn set_utility_qos() {
+    #[cfg(target_os = "macos")]
+    // SAFETY: the call changes only the QoS class of the current thread.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
     }
 }
 
 #[async_trait::async_trait]
 impl Transcriber for WhisperTranscriber {
     async fn transcribe(&self, samples: &[f32], _language: Option<&str>) -> Result<String> {
-        let recognizer = self.recognizer.clone();
-        let samples = samples.to_vec();
-        tokio::task::spawn_blocking(move || {
-            let stream = recognizer.create_stream();
-            stream.accept_waveform(PIPELINE_RATE as i32, &samples);
-            recognizer.decode(&stream);
-            stream
-                .get_result()
-                .map(|r| r.text.trim().to_owned())
-                .unwrap_or_default()
-        })
-        .await
-        .map_err(|e| MorselError::Transcribe(e.to_string()))
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        self.jobs
+            .send((samples.to_vec(), reply))
+            .map_err(|_| MorselError::Transcribe("the Whisper thread stopped".into()))?;
+        answer
+            .await
+            .map_err(|_| MorselError::Transcribe("the Whisper thread stopped".into()))
     }
 }
 
@@ -66,6 +100,23 @@ impl Transcriber for WhisperTranscriber {
 mod tests {
     use super::*;
     use crate::transcribe::model_download;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn set_utility_qos_sets_the_thread_class() {
+        let class = std::thread::spawn(|| {
+            set_utility_qos();
+            let mut class = libc::qos_class_t::QOS_CLASS_UNSPECIFIED;
+            let mut priority = 0;
+            unsafe {
+                libc::pthread_get_qos_class_np(libc::pthread_self(), &mut class, &mut priority);
+            }
+            class
+        })
+        .join()
+        .unwrap();
+        assert_eq!(class as u32, libc::qos_class_t::QOS_CLASS_UTILITY as u32);
+    }
 
     #[test]
     fn missing_model_dir_is_an_error() {
@@ -101,12 +152,15 @@ mod tests {
         let text = t.transcribe(&samples, None).await.unwrap().to_lowercase();
         eprintln!("whisper: {:?} in {:?}", text, started.elapsed());
         assert!(text.contains("hello") && text.contains("test"), "{text}");
-        let thirty: Vec<f32> = samples.iter().cycle().take(16_000 * 30).copied().collect();
-        let started = std::time::Instant::now();
-        t.transcribe(&thirty, None).await.unwrap();
-        let took = started.elapsed();
-        eprintln!("whisper: 30 s chunk in {took:?}");
-        // Two streams need less than half of real time: 30 s of audio in less than 15 s.
-        assert!(took.as_secs_f32() < 15.0, "30 s chunk took {took:?}");
+        // The longest chunk is 28 s. Two streams need less than half of real time for each
+        // chunk, also with the QoS class `utility`: 28 s of audio in less than 14 s.
+        let longest: Vec<f32> = samples.iter().cycle().take(16_000 * 28).copied().collect();
+        for _ in 0..2 {
+            let started = std::time::Instant::now();
+            t.transcribe(&longest, None).await.unwrap();
+            let took = started.elapsed();
+            eprintln!("whisper: 28 s chunk in {took:?}");
+            assert!(took.as_secs_f32() < 14.0, "28 s chunk took {took:?}");
+        }
     }
 }
