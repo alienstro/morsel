@@ -121,6 +121,29 @@ fn quick_model_name(settings: &Settings) -> &str {
     }
 }
 
+/// The size of all files in a folder and its subfolders. A missing folder has size 0.
+fn folder_size(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.metadata() {
+            Ok(meta) if meta.is_dir() => folder_size(&entry.path()),
+            Ok(meta) => meta.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+/// Deletes a folder and its files. A missing folder is not an error.
+fn remove_folder(dir: &std::path::Path) -> Result<()> {
+    match std::fs::remove_dir_all(dir) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
 /// A file name that every file system accepts: no path or wildcard characters.
 fn safe_file_name(name: &str) -> String {
     let cleaned: String = name
@@ -284,6 +307,28 @@ impl AppState {
             json!({ "meetingId": id, "status": status, "warning": null }),
         );
         Ok(())
+    }
+
+    /// The size in bytes of the saved audio of a meeting, or `None` when it has none.
+    pub fn audio_size(&self, meeting_id: MeetingId) -> Option<u64> {
+        let dir = audio_dir(&self.data_dir, meeting_id);
+        dir.exists().then(|| folder_size(&dir))
+    }
+
+    /// Deletes the saved audio of a meeting. The transcript and the notes stay. Morsel refuses
+    /// while the meeting records, or while the after job needs the audio.
+    pub async fn delete_audio(&self, meeting_id: MeetingId) -> Result<()> {
+        if let Some(session) = self.session.lock().await.as_ref()
+            && session.id() == meeting_id
+        {
+            return Err(MorselError::AlreadyRecording);
+        }
+        if self.get_meeting(meeting_id)?.summary.status == MeetingStatus::Transcribing {
+            return Err(MorselError::Invalid(
+                "Morsel transcribes this audio now. Delete it when the notes are ready.".into(),
+            ));
+        }
+        remove_folder(&audio_dir(&self.data_dir, meeting_id))
     }
 
     /// The meetings that wait for the after job, oldest first.
@@ -506,7 +551,8 @@ impl AppState {
         }
         self.cancel_notes(meeting_id);
         self.after.remove(meeting_id);
-        library::delete_meeting(&self.conn(), meeting_id)
+        library::delete_meeting(&self.conn(), meeting_id)?;
+        remove_folder(&audio_dir(&self.data_dir, meeting_id))
     }
 
     /// Creates a template when `id` is `None`, else changes it. Returns the id.
@@ -561,7 +607,7 @@ impl AppState {
 
     pub fn data_info(&self) -> Result<DataInfo> {
         let notes = library::count_meetings(&self.conn())?;
-        let mut bytes = 0;
+        let mut bytes = folder_size(&self.data_dir.join("audio"));
         if let Ok(entries) = std::fs::read_dir(&self.data_dir) {
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata()
@@ -615,6 +661,11 @@ impl AppState {
         for token in self.notes_jobs.lock().expect("jobs lock").values() {
             token.cancel();
         }
+        for id in self.after.waiting() {
+            self.after.remove(id);
+        }
+        self.after.pause_running();
+        remove_folder(&self.data_dir.join("audio"))?;
         {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
@@ -769,6 +820,16 @@ pub async fn model_status(state: State<'_, AppState>) -> Result<bool> {
 #[tauri::command]
 pub async fn download_model(state: State<'_, AppState>) -> Result<()> {
     state.download_model().await
+}
+
+#[tauri::command]
+pub async fn audio_size(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<Option<u64>> {
+    Ok(state.audio_size(meeting_id))
+}
+
+#[tauri::command]
+pub async fn delete_audio(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<()> {
+    state.delete_audio(meeting_id).await
 }
 
 #[tauri::command]
@@ -1060,6 +1121,75 @@ mod tests {
         s.stop_meeting().await.unwrap();
         s.delete_meeting(id).await.unwrap();
         assert!(s.queued_after_jobs().is_empty());
+    }
+
+    fn saved_audio(d: &tempfile::TempDir, id: MeetingId) -> std::path::PathBuf {
+        crate::audio::recording::audio_dir(d.path(), id)
+    }
+
+    #[tokio::test]
+    async fn delete_audio_keeps_the_transcript() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        meetings::add_line(
+            &s.conn(),
+            &crate::types::TranscriptLine {
+                meeting_id: id,
+                speaker: crate::types::Speaker::You,
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "hello".into(),
+            },
+        )
+        .unwrap();
+        assert!(s.audio_size(id).is_some());
+        s.delete_audio(id).await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+        assert_eq!(s.audio_size(id), None);
+        assert_eq!(s.get_meeting(id).unwrap().lines.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_audio_refuses_while_recording_or_transcribing() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert!(s.delete_audio(id).await.is_err());
+        use_after_mode(&s);
+        s.stop_meeting().await.unwrap();
+        let after = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(s.delete_audio(after).await.is_err());
+        assert!(saved_audio(&d, after).exists());
+    }
+
+    #[tokio::test]
+    async fn delete_meeting_deletes_its_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(saved_audio(&d, id).exists());
+        s.delete_meeting(id).await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+    }
+
+    #[tokio::test]
+    async fn delete_all_data_deletes_the_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        s.delete_all_data().await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+    }
+
+    #[test]
+    fn data_info_counts_the_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let before = s.data_info().unwrap().bytes;
+        let dir = saved_audio(&d, 7);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("you.wav"), vec![0u8; 5_000]).unwrap();
+        assert_eq!(s.data_info().unwrap().bytes, before + 5_000);
     }
 
     #[test]

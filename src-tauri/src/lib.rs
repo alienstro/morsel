@@ -65,6 +65,8 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::test_notes_key,
             commands::model_status,
             commands::download_model,
+            commands::audio_size,
+            commands::delete_audio,
             commands::search_notes,
             commands::list_people,
             commands::delete_meeting,
@@ -158,7 +160,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 }
 
 /// Queues the after-mode meetings that a quit or a crash left, and starts the after-mode worker.
-fn start_after_jobs<R: Runtime>(handle: tauri::AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
+fn start_after_jobs<R: Runtime>(
+    handle: tauri::AppHandle<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
     handle.state::<AppState>().queue_unfinished_after_jobs()?;
     tauri::async_runtime::spawn(async move {
         handle.state::<AppState>().run_after_jobs().await;
