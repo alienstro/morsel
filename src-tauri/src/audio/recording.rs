@@ -99,8 +99,9 @@ impl StreamReader {
     /// Moves to `ms` from the start of the audio.
     pub fn seek_ms(&mut self, ms: u64) -> Result<()> {
         self.position = (ms * PIPELINE_RATE as u64 / 1_000).min(self.samples);
-        self.file
-            .seek(SeekFrom::Start(self.data_start + self.position * BYTES_PER_SAMPLE))?;
+        self.file.seek(SeekFrom::Start(
+            self.data_start + self.position * BYTES_PER_SAMPLE,
+        ))?;
         Ok(())
     }
 
@@ -167,7 +168,11 @@ mod tests {
         assert_eq!(r.duration_ms(), 2_000);
         let back = read_all(&mut r);
         assert_eq!(back.len(), samples.len());
-        assert!(back.iter().zip(&samples).all(|(a, b)| (a - b).abs() < 0.001));
+        assert!(
+            back.iter()
+                .zip(&samples)
+                .all(|(a, b)| (a - b).abs() < 0.001)
+        );
     }
 
     #[test]

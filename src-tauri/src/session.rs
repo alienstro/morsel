@@ -303,7 +303,11 @@ async fn pump(
 
 async fn transcribe_chunk(shared: Shared, chunk: AudioChunk) {
     let end_ms = chunk.start_ms + (chunk.samples.len() as u64 * 1000 / PIPELINE_RATE as u64);
-    let _turn = shared.gate.acquire().await.expect("the gate is never closed");
+    let _turn = shared
+        .gate
+        .acquire()
+        .await
+        .expect("the gate is never closed");
     let text = match transcribe_with_retry(
         shared.transcriber.as_ref(),
         &chunk.samples,
@@ -334,10 +338,10 @@ async fn transcribe_chunk(shared: Shared, chunk: AudioChunk) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::TranscribeTiming;
     use crate::audio::source::AudioSource;
     use crate::db::meetings::get_meeting;
     use crate::events::{STATUS, TRANSCRIPT, VecSink};
+    use crate::settings::TranscribeTiming;
     use crate::transcribe::Transcriber;
     use std::sync::Mutex;
     use tokio::sync::mpsc::Sender;
@@ -519,7 +523,12 @@ mod tests {
         .unwrap();
         send(&mic_slot, speech(12.0)).await;
         session.stop().await.unwrap();
-        assert!(get_meeting(&db.lock().unwrap(), id).unwrap().lines.is_empty());
+        assert!(
+            get_meeting(&db.lock().unwrap(), id)
+                .unwrap()
+                .lines
+                .is_empty()
+        );
         assert_eq!(counting.most.load(Ordering::SeqCst), 0);
         assert_eq!(saved_ms(&data, id, "you.wav"), 12_000);
     }

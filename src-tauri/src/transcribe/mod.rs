@@ -1,5 +1,6 @@
 //! Speech to text for one chunk: local Whisper Turbo or a cloud endpoint.
 
+pub mod after;
 pub mod cloud;
 pub mod model_download;
 pub mod whisper;

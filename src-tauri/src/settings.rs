@@ -24,6 +24,24 @@ pub enum TranscribeTiming {
     After,
 }
 
+impl TranscribeTiming {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TranscribeTiming::Live => "live",
+            TranscribeTiming::After => "after",
+        }
+    }
+
+    /// Any value other than "after" reads as `Live`, the default.
+    pub fn parse(value: &str) -> Self {
+        if value == "after" {
+            TranscribeTiming::After
+        } else {
+            TranscribeTiming::Live
+        }
+    }
+}
+
 /// Settings never hold an API key. Keys live in the Keychain (see `secrets`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
