@@ -1,3 +1,4 @@
+pub mod ask;
 pub mod audio;
 pub mod chunker;
 pub mod commands;

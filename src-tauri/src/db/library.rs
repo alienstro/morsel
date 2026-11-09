@@ -3,7 +3,8 @@
 use super::meetings::{MeetingSummary, SUMMARY_SQL, summary_from_row, to_summary};
 use crate::types::{MeetingId, MorselError, Result};
 use rusqlite::types::Value;
-use rusqlite::{Connection, params_from_iter};
+use crate::ask::AskAnswer;
+use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::{Deserialize, Serialize};
 
 /// The filters of the All notes screen.
@@ -174,6 +175,56 @@ pub fn usage_since(conn: &Connection, since_ms: i64) -> Result<UsageTotal> {
             })
         },
     )?)
+}
+
+type AskRow = (i64, String, String, String);
+
+fn ask_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AskRow> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+fn to_ask(raw: AskRow) -> Result<AskAnswer> {
+    let sources = serde_json::from_str(&raw.3)
+        .map_err(|e| MorselError::Db(format!("ask {} sources: {e}", raw.0)))?;
+    Ok(AskAnswer {
+        id: Some(raw.0),
+        question: raw.1,
+        answer: raw.2,
+        sources,
+    })
+}
+
+/// Saves an answer across meetings. Returns its id.
+pub fn save_ask(conn: &Connection, answer: &AskAnswer) -> Result<i64> {
+    let sources = serde_json::to_string(&answer.sources).expect("sources serialize");
+    conn.execute(
+        "INSERT INTO asks (question, answer, sources_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![answer.question, answer.answer, sources, super::now_ms()],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// The newest saved questions first.
+pub fn list_asks(conn: &Connection, limit: u32) -> Result<Vec<AskAnswer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, question, answer, sources_json FROM asks ORDER BY created_at DESC, id DESC LIMIT ?1",
+    )?;
+    let raws = stmt
+        .query_map([limit], ask_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    raws.into_iter().map(to_ask).collect()
+}
+
+pub fn get_ask(conn: &Connection, id: i64) -> Result<AskAnswer> {
+    let raw = conn
+        .query_row(
+            "SELECT id, question, answer, sources_json FROM asks WHERE id = ?1",
+            [id],
+            ask_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| MorselError::NotFound(format!("question {id}")))?;
+    to_ask(raw)
 }
 
 #[cfg(test)]
