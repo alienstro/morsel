@@ -10,7 +10,7 @@ use crate::events::{EventSink, MODEL_DOWNLOAD};
 use crate::llm::{self, LlmConfig};
 use crate::notes::writer::{CancellationToken, NotesContext};
 use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
-use crate::session::MeetingSession;
+use crate::session::{MeetingSession, MeetingSetup};
 use crate::settings::{self, Settings, TranscribeMode};
 use crate::transcribe::Transcriber;
 use crate::transcribe::cloud::CloudTranscriber;
@@ -212,9 +212,13 @@ impl AppState {
             self.engines.system(),
             transcriber,
             self.sink.clone(),
-            &title,
-            template_id,
-            Some(settings.language),
+            MeetingSetup {
+                title,
+                template_id,
+                language: Some(settings.language),
+                data_dir: self.data_dir.clone(),
+                timing: settings.transcribe_timing,
+            },
         )?;
         *slot = Some(session);
         if !people.is_empty() {

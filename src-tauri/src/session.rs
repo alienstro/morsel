@@ -1,20 +1,23 @@
 //! One meeting: two audio sources → chunkers → transcriber → SQLite and events.
 
+use crate::audio::recording::{StreamWriter, audio_dir};
 use crate::audio::{PIPELINE_RATE, level::rms, source::AudioSource};
 use crate::chunker::Chunker;
 use crate::db::SharedDb;
 use crate::db::meetings::{add_line, create_meeting, mark_open_meetings_interrupted, set_status};
 use crate::events::{EventSink, LEVELS, STATUS, TRANSCRIPT};
+use crate::settings::TranscribeTiming;
 use crate::transcribe::{Transcriber, transcribe_with_retry};
 use crate::types::{
     AudioChunk, MeetingId, MeetingStatus, MorselError, Result, Speaker, TranscriptLine,
 };
 use serde_json::json;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
-use tokio::sync::mpsc::{Receiver, channel};
+use tokio::sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 
 const CHANNEL_FRAMES: usize = 512;
@@ -43,6 +46,16 @@ struct Shared {
     gate: Arc<Semaphore>,
 }
 
+/// What a new meeting needs besides its audio sources and its transcriber.
+pub struct MeetingSetup {
+    pub title: String,
+    pub template_id: i64,
+    pub language: Option<String>,
+    /// The app data folder. The audio goes to `audio/<meeting id>/` in it.
+    pub data_dir: PathBuf,
+    pub timing: TranscribeTiming,
+}
+
 pub struct MeetingSession {
     shared: Shared,
     mic: Box<dyn AudioSource>,
@@ -55,20 +68,25 @@ pub struct MeetingSession {
 impl MeetingSession {
     /// Starts the microphone first. Without it, no meeting is created.
     /// Without system audio, the meeting records the microphone only and the status event has a warning.
-    #[allow(clippy::too_many_arguments)]
+    /// Each stream is saved to a WAV file. In `TranscribeTiming::After`, the streams make no chunks.
     pub fn start(
         db: SharedDb,
         mut mic: Box<dyn AudioSource>,
         mut system: Box<dyn AudioSource>,
         transcriber: Arc<dyn Transcriber>,
         sink: Arc<dyn EventSink>,
-        title: &str,
-        template_id: i64,
-        language: Option<String>,
+        setup: MeetingSetup,
     ) -> Result<(Self, MeetingId)> {
+        let MeetingSetup {
+            title,
+            template_id,
+            language,
+            data_dir,
+            timing,
+        } = setup;
         let (mic_tx, mic_rx) = channel(CHANNEL_FRAMES);
         mic.start(mic_tx)?;
-        let id = match create_meeting(&db.lock().expect("db lock"), title, template_id) {
+        let id = match create_meeting(&db.lock().expect("db lock"), &title, template_id) {
             Ok(id) => id,
             Err(err) => {
                 mic.stop();
@@ -96,12 +114,15 @@ impl MeetingSession {
         let paused = Arc::new(AtomicBool::new(false));
         let you_level = Arc::new(AtomicU32::new(0));
         let others_level = Arc::new(AtomicU32::new(0));
+        let audio = audio_dir(&data_dir, id);
         let mut pumps = vec![tokio::spawn(pump(
             shared.clone(),
             Speaker::You,
             mic_rx,
             paused.clone(),
             you_level.clone(),
+            Recorder::start(&shared, &audio.join(audio_file(Speaker::You))),
+            timing,
         ))];
         if let Some(rx) = sys_rx {
             pumps.push(tokio::spawn(pump(
@@ -110,6 +131,8 @@ impl MeetingSession {
                 rx,
                 paused.clone(),
                 others_level.clone(),
+                Recorder::start(&shared, &audio.join(audio_file(Speaker::Others))),
+                timing,
             )));
         }
         let levels = tokio::spawn(async move {
@@ -176,28 +199,104 @@ impl MeetingSession {
     }
 }
 
-/// Reads one stream until its source stops. Each complete chunk becomes a transcription job.
+/// The file name of the saved audio of one speaker.
+pub fn audio_file(speaker: Speaker) -> &'static str {
+    match speaker {
+        Speaker::You => "you.wav",
+        Speaker::Others => "others.wav",
+    }
+}
+
+/// Saves one stream on a blocking thread, so a slow disk never holds up the audio pump.
+struct Recorder {
+    frames: UnboundedSender<Vec<f32>>,
+    writer: JoinHandle<()>,
+}
+
+impl Recorder {
+    /// Returns `None` when the file cannot be made. The meeting continues without saved audio.
+    fn start(shared: &Shared, path: &Path) -> Option<Self> {
+        let mut file = match StreamWriter::create(path) {
+            Ok(file) => file,
+            Err(err) => {
+                warn_audio(shared, &err);
+                return None;
+            }
+        };
+        let (frames, mut inbox) = unbounded_channel::<Vec<f32>>();
+        let shared = shared.clone();
+        let writer = tokio::task::spawn_blocking(move || {
+            while let Some(frame) = inbox.blocking_recv() {
+                if let Err(err) = file.write(&frame) {
+                    warn_audio(&shared, &err);
+                    return;
+                }
+            }
+            if let Err(err) = file.finish() {
+                warn_audio(&shared, &err);
+            }
+        });
+        Some(Self { frames, writer })
+    }
+
+    fn save(&self, frame: &[f32]) {
+        // The writer stops only after an error that it already reported.
+        let _ = self.frames.send(frame.to_vec());
+    }
+
+    /// Waits until the file has its final header.
+    async fn finish(self) {
+        drop(self.frames);
+        let _ = self.writer.await;
+    }
+}
+
+fn warn_audio(shared: &Shared, err: &MorselError) {
+    eprintln!("cannot save the meeting audio: {err}");
+    shared.sink.emit(
+        STATUS,
+        json!({
+            "meetingId": shared.id,
+            "status": MeetingStatus::Recording,
+            "warning": format!("Morsel cannot save the audio: {err}"),
+        }),
+    );
+}
+
+/// Reads one stream until its source stops. It saves each frame, and in live mode each complete
+/// chunk becomes a transcription job.
 async fn pump(
     shared: Shared,
     speaker: Speaker,
     mut rx: Receiver<Vec<f32>>,
     paused: Arc<AtomicBool>,
     level: Arc<AtomicU32>,
+    recorder: Option<Recorder>,
+    timing: TranscribeTiming,
 ) {
     let mut chunker = Chunker::new(speaker);
     let mut jobs = JoinSet::new();
+    let live = timing == TranscribeTiming::Live;
     while let Some(frame) = rx.recv().await {
         if paused.load(Ordering::SeqCst) {
             continue;
         }
         let value = rms(&frame);
         level.fetch_max(value.to_bits(), Ordering::Relaxed);
-        for chunk in chunker.push(&frame) {
-            jobs.spawn(transcribe_chunk(shared.clone(), chunk));
+        if let Some(recorder) = &recorder {
+            recorder.save(&frame);
+        }
+        if live {
+            for chunk in chunker.push(&frame) {
+                jobs.spawn(transcribe_chunk(shared.clone(), chunk));
+            }
         }
     }
-    if let Some(chunk) = chunker.flush() {
+    if live && let Some(chunk) = chunker.flush() {
         jobs.spawn(transcribe_chunk(shared.clone(), chunk));
+    }
+    if let Some(recorder) = recorder {
+        recorder.finish().await;
     }
     while jobs.join_next().await.is_some() {}
 }
@@ -235,6 +334,7 @@ async fn transcribe_chunk(shared: Shared, chunk: AudioChunk) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::TranscribeTiming;
     use crate::audio::source::AudioSource;
     use crate::db::meetings::get_meeting;
     use crate::events::{STATUS, TRANSCRIPT, VecSink};
@@ -330,16 +430,119 @@ mod tests {
         t: Arc<dyn Transcriber>,
         sink: Arc<VecSink>,
     ) -> Result<(MeetingSession, MeetingId)> {
+        let data_dir = tempfile::tempdir().unwrap().keep();
+        start_with(db, mic, sys, t, sink, data_dir, TranscribeTiming::Live)
+    }
+
+    fn start_with(
+        db: &SharedDb,
+        mic: Box<dyn AudioSource>,
+        sys: Box<dyn AudioSource>,
+        t: Arc<dyn Transcriber>,
+        sink: Arc<VecSink>,
+        data_dir: std::path::PathBuf,
+        timing: TranscribeTiming,
+    ) -> Result<(MeetingSession, MeetingId)> {
         MeetingSession::start(
             db.clone(),
             mic,
             sys,
             t,
             sink,
-            "Weekly product sync",
-            5,
-            None,
+            MeetingSetup {
+                title: "Weekly product sync".into(),
+                template_id: 5,
+                language: None,
+                data_dir,
+                timing,
+            },
         )
+    }
+
+    fn saved_ms(data_dir: &std::path::Path, id: MeetingId, file: &str) -> u64 {
+        let path = crate::audio::recording::audio_dir(data_dir, id).join(file);
+        crate::audio::recording::StreamReader::open(&path)
+            .unwrap()
+            .duration_ms()
+    }
+
+    #[tokio::test]
+    async fn meeting_audio_is_saved_for_each_speaker() {
+        let (d, db) = db();
+        let (t, sink) = deps(false, 0);
+        let ((mic, mic_slot), (sys, sys_slot)) = (source(), source());
+        let data = d.path().to_path_buf();
+        let (session, id) =
+            start_with(&db, mic, sys, t, sink, data.clone(), TranscribeTiming::Live).unwrap();
+        send(&mic_slot, speech(3.0)).await;
+        send(&sys_slot, speech(4.0)).await;
+        session.stop().await.unwrap();
+        assert_eq!(saved_ms(&data, id, "you.wav"), 3_000);
+        assert_eq!(saved_ms(&data, id, "others.wav"), 4_000);
+    }
+
+    #[tokio::test]
+    async fn paused_audio_is_not_saved() {
+        let (d, db) = db();
+        let (t, sink) = deps(false, 0);
+        let ((mic, mic_slot), (sys, _s)) = (source(), source());
+        let data = d.path().to_path_buf();
+        let (session, id) =
+            start_with(&db, mic, sys, t, sink, data.clone(), TranscribeTiming::Live).unwrap();
+        send(&mic_slot, speech(5.0)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        session.pause().unwrap();
+        send(&mic_slot, speech(20.0)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        session.resume().unwrap();
+        send(&mic_slot, speech(5.0)).await;
+        session.stop().await.unwrap();
+        assert_eq!(saved_ms(&data, id, "you.wav"), 10_000);
+    }
+
+    #[tokio::test]
+    async fn after_mode_records_and_does_not_transcribe() {
+        let (d, db) = db();
+        let counting = Arc::new(CountingTranscriber::default());
+        let sink = Arc::new(VecSink::default());
+        let ((mic, mic_slot), (sys, _s)) = (source(), source());
+        let data = d.path().to_path_buf();
+        let (session, id) = start_with(
+            &db,
+            mic,
+            sys,
+            counting.clone(),
+            sink,
+            data.clone(),
+            TranscribeTiming::After,
+        )
+        .unwrap();
+        send(&mic_slot, speech(12.0)).await;
+        session.stop().await.unwrap();
+        assert!(get_meeting(&db.lock().unwrap(), id).unwrap().lines.is_empty());
+        assert_eq!(counting.most.load(Ordering::SeqCst), 0);
+        assert_eq!(saved_ms(&data, id, "you.wav"), 12_000);
+    }
+
+    #[tokio::test]
+    async fn audio_write_error_keeps_live_transcription() {
+        let (d, db) = db();
+        let (t, sink) = deps(false, 0);
+        let ((mic, mic_slot), (sys, _s)) = (source(), source());
+        // A file where the audio folder must be: the folder cannot be made.
+        let data = d.path().join("blocked");
+        std::fs::write(&data, b"not a folder").unwrap();
+        let (session, id) =
+            start_with(&db, mic, sys, t, sink.clone(), data, TranscribeTiming::Live).unwrap();
+        send(&mic_slot, speech(3.0)).await;
+        session.stop().await.unwrap();
+        assert_eq!(get_meeting(&db.lock().unwrap(), id).unwrap().lines.len(), 1);
+        let warned = sink.named(STATUS).iter().any(|e| {
+            e["warning"]
+                .as_str()
+                .is_some_and(|w| w.contains("cannot save the audio"))
+        });
+        assert!(warned, "{:?}", sink.named(STATUS));
     }
 
     /// Counts the calls that run at the same time.
