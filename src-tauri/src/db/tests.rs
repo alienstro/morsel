@@ -225,7 +225,10 @@ mod parts {
         set_status(&conn, failed, MeetingStatus::NotesFailed).unwrap();
         let cancelled = create_meeting(&conn, "Cancelled", 1).unwrap();
         set_status(&conn, cancelled, MeetingStatus::NotesCancelled).unwrap();
-        assert_eq!(meetings_without_parts(&conn).unwrap(), vec![failed, cancelled]);
+        assert_eq!(
+            meetings_without_parts(&conn).unwrap(),
+            vec![failed, cancelled]
+        );
     }
 
     #[test]
