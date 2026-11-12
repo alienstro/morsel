@@ -115,12 +115,12 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         eprintln!("marked {interrupted} meeting(s) as interrupted");
     }
     let http = reqwest::Client::new();
-    // A debug build gets a new code signature on each rebuild, so the Keychain asks again each time.
-    #[cfg(debug_assertions)]
-    let secrets: Arc<dyn SecretStore> =
-        Arc::new(secrets::FileStore::new(&data_dir.join("secrets.json")));
-    #[cfg(not(debug_assertions))]
-    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::KeychainStore);
+    // Each build gets a new ad-hoc signature, so the Keychain would ask for the password after
+    // each update. The keys live in an owner-only file, and older Keychain keys move there once.
+    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::open_file_store(
+        &data_dir.join("secrets.json"),
+        &secrets::KeychainStore,
+    ));
     // Whisper Turbo has its own folder in here. Older versions also put Parakeet here.
     let models_root = transcribe::model_download::models_root(&data_dir);
     transcribe::model_download::remove_old_models(&models_root);

@@ -1,4 +1,5 @@
-//! API keys. Release builds keep them in the macOS Keychain. Debug builds keep them in a file.
+//! API keys, in a file that only the owner can read. Older versions kept them in the macOS
+//! Keychain, and the first start moves them to the file (see `open_file_store`).
 
 use crate::types::{MorselError, Result};
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &str) -> Result<()>;
 }
 
-/// The real store: the macOS Keychain, service `app.morsel`.
+/// The macOS Keychain, service `app.morsel`. Only the one-time move of old keys reads it.
 pub struct KeychainStore;
 
 impl KeychainStore {
@@ -56,8 +57,8 @@ impl SecretStore for KeychainStore {
     }
 }
 
-/// A JSON file that only the owner can read (mode 0600). Debug builds use it, because each
-/// rebuild changes the code signature and the Keychain then asks for access again.
+/// A JSON file that only the owner can read (mode 0600). Morsel has an ad-hoc signature, which
+/// changes with each build, so the Keychain asks for the password again after each update.
 pub struct FileStore {
     path: PathBuf,
     lock: Mutex<()>,
@@ -123,6 +124,31 @@ impl SecretStore for FileStore {
             values.remove(account);
         })
     }
+}
+
+/// Opens the secrets file. When the file does not exist yet, it first copies the keys of
+/// older versions from the Keychain, one time. A key that the Keychain refuses is skipped.
+/// The Keychain copies stay, so an older build still finds them.
+pub fn open_file_store(path: &Path, keychain: &dyn SecretStore) -> FileStore {
+    let store = FileStore::new(path);
+    if path.exists() {
+        return store;
+    }
+    let mut moved = HashMap::new();
+    for account in ACCOUNTS {
+        match keychain.get(account) {
+            Ok(Some(value)) => {
+                moved.insert((*account).to_owned(), value);
+            }
+            Ok(None) => {}
+            Err(err) => eprintln!("cannot copy {account} from the Keychain: {err}"),
+        }
+    }
+    // Write the file even when it is empty, so that the Keychain is read only one time.
+    if let Err(err) = store.change(|values| values.extend(moved)) {
+        eprintln!("cannot write the secrets file: {err}");
+    }
+    store
 }
 
 /// An in-memory store for tests.
@@ -196,5 +222,74 @@ mod tests {
         assert!(is_known_account("notes_api_key"));
         assert!(is_known_account("transcribe_api_key"));
         assert!(!is_known_account("other"));
+    }
+
+    /// A Keychain stand-in that counts reads, and fails for one account (the user pressed Deny).
+    #[derive(Default)]
+    struct CountingStore {
+        inner: MemoryStore,
+        reads: std::sync::atomic::AtomicUsize,
+        deny: Option<&'static str>,
+    }
+
+    impl SecretStore for CountingStore {
+        fn get(&self, account: &str) -> Result<Option<String>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.deny == Some(account) {
+                return Err(MorselError::Keychain("denied".into()));
+            }
+            self.inner.get(account)
+        }
+        fn set(&self, account: &str, value: &str) -> Result<()> {
+            self.inner.set(account, value)
+        }
+        fn delete(&self, account: &str) -> Result<()> {
+            self.inner.delete(account)
+        }
+    }
+
+    #[test]
+    fn first_open_moves_the_keychain_keys_into_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let keychain = CountingStore::default();
+        keychain.set(NOTES_KEY, "sk-1").unwrap();
+        keychain.set(COMPOSIO_KEY, "ak_1").unwrap();
+
+        let store = open_file_store(&path, &keychain);
+
+        assert_eq!(store.get(NOTES_KEY).unwrap().as_deref(), Some("sk-1"));
+        assert_eq!(store.get(COMPOSIO_KEY).unwrap().as_deref(), Some("ak_1"));
+        assert_eq!(store.get(TRANSCRIBE_KEY).unwrap(), None);
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn later_opens_do_not_read_the_keychain() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let keychain = CountingStore::default();
+        open_file_store(&path, &keychain);
+        let reads = keychain.reads.load(std::sync::atomic::Ordering::SeqCst);
+
+        open_file_store(&path, &keychain);
+
+        assert_eq!(keychain.reads.load(std::sync::atomic::Ordering::SeqCst), reads);
+    }
+
+    #[test]
+    fn a_denied_keychain_read_skips_only_that_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let keychain = CountingStore {
+            deny: Some(NOTES_KEY),
+            ..Default::default()
+        };
+        keychain.set(COMPOSIO_KEY, "ak_1").unwrap();
+
+        let store = open_file_store(&path, &keychain);
+
+        assert_eq!(store.get(NOTES_KEY).unwrap(), None);
+        assert_eq!(store.get(COMPOSIO_KEY).unwrap().as_deref(), Some("ak_1"));
     }
 }
