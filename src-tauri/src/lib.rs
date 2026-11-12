@@ -11,6 +11,7 @@ pub mod local_llm;
 pub mod model_manager;
 pub mod notes;
 pub mod permissions;
+pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod settings;
