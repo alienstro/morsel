@@ -50,7 +50,9 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-llama-cpp-2 = "0.1.161"
+# Pinned to main of 2026-11-11 (llama.cpp v0.9.0), because 0.1.161 cannot load
+# EmbeddingGemma 2 (llama.cpp PR #30054). Go back to crates.io at the first release after 0.1.161.
+llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "955aa2f72463c2535cc5ab894d5d52f27a38cde2" }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

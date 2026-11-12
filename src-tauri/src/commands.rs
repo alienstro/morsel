@@ -8,19 +8,26 @@ use crate::db::library::{self, NotesFilter, NotesPage, UsageTotal};
 use crate::db::meetings::{self, MeetingDetail, MeetingSummary};
 use crate::db::templates::{self, Template, TemplateInput};
 use crate::db::{SharedDb, now_ms};
-use crate::events::{EventSink, MODEL_DOWNLOAD, NOTES_FAILED, NOTES_MODEL_DOWNLOAD, STATUS};
+use crate::events::{
+    EventSink, MODEL_DOWNLOAD, NOTES_FAILED, NOTES_MODEL_DOWNLOAD, SEARCH_MODEL_DOWNLOAD, STATUS,
+};
 use crate::llm::{self, LlmConfig};
 use crate::local_llm::{
     LocalLlm, NOTES_FILE, notes_model_dir, notes_model_files, notes_model_ready,
 };
 use crate::model_manager::{LocalChat, ModelManager, Purpose, WhisperControl};
 use crate::notes::writer::{CancellationToken, NotesContext};
+use crate::search::embed::{
+    LocalEmbedder, ManagedEmbed, SEARCH_FILE, search_model_dir, search_model_files,
+};
+use crate::search::index::{Embed, index_all};
 use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
 use crate::session::{MeetingSession, MeetingSetup};
 use crate::settings::{self, NotesMode, Settings, TranscribeMode, TranscribeTiming};
 use crate::transcribe::Transcriber;
 use crate::transcribe::after::{AfterQueue, transcribe_meeting};
 use crate::transcribe::cloud::CloudTranscriber;
+use crate::transcribe::model_download::file_ready;
 use crate::transcribe::model_download::{ensure_files, ensure_model, model_dir, model_ready};
 use crate::transcribe::whisper::WhisperTranscriber;
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
@@ -215,6 +222,7 @@ fn safe_file_name(name: &str) -> String {
 pub struct LocalModels {
     pub root: PathBuf,
     pub notes_model: Arc<ModelManager<LocalLlm>>,
+    pub search_model: Arc<ModelManager<LocalEmbedder>>,
 }
 
 pub struct AppState {
@@ -229,6 +237,7 @@ pub struct AppState {
     notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
     after: AfterQueue,
     notes_model: Arc<ModelManager<LocalLlm>>,
+    search_model: Arc<ModelManager<LocalEmbedder>>,
 }
 
 impl AppState {
@@ -244,6 +253,7 @@ impl AppState {
         let LocalModels {
             root: models_root,
             notes_model,
+            search_model,
         } = models;
         Self {
             db,
@@ -257,6 +267,7 @@ impl AppState {
             notes_jobs: Arc::new(Mutex::new(HashMap::new())),
             after: AfterQueue::default(),
             notes_model,
+            search_model,
         }
     }
 
@@ -335,6 +346,52 @@ impl AppState {
             },
         )
         .await
+    }
+
+    pub fn search_model_ready(&self) -> bool {
+        let dir = search_model_dir(&self.models_root);
+        search_model_files().iter().all(|f| file_ready(&dir, f))
+    }
+
+    /// The search model, or `None` when it is not downloaded.
+    pub fn search_embed(&self) -> Option<Arc<dyn Embed>> {
+        self.search_model_ready().then(|| {
+            Arc::new(ManagedEmbed::new(
+                self.search_model.clone(),
+                search_model_dir(&self.models_root).join(SEARCH_FILE),
+            )) as Arc<dyn Embed>
+        })
+    }
+
+    /// Indexes old meetings, and embeds parts that have no embedding, on a background thread.
+    pub fn start_indexing(&self) -> std::thread::JoinHandle<()> {
+        let db = self.db.clone();
+        let sink = self.sink.clone();
+        let embed = self.search_embed();
+        std::thread::spawn(move || {
+            if let Err(err) = index_all(&db, embed.as_deref(), sink.as_ref()) {
+                eprintln!("cannot index the meetings for search: {err}");
+            }
+        })
+    }
+
+    /// Downloads the search model, then embeds the parts that have no embedding.
+    pub async fn download_search_model(&self) -> Result<()> {
+        let sink = self.sink.clone();
+        ensure_files(
+            &self.http,
+            &search_model_dir(&self.models_root),
+            &search_model_files(),
+            move |received, total| {
+                sink.emit(
+                    SEARCH_MODEL_DOWNLOAD,
+                    json!({ "received": received, "total": total }),
+                );
+            },
+        )
+        .await?;
+        self.start_indexing();
+        Ok(())
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
@@ -625,6 +682,7 @@ impl AppState {
             sink: self.sink.clone(),
             notes,
             quick,
+            embed: self.search_embed(),
         };
         let cancel = CancellationToken::new();
         let jobs = self.notes_jobs.clone();
@@ -715,7 +773,15 @@ impl AppState {
         meeting_id: Option<MeetingId>,
     ) -> Result<AskAnswer> {
         let (_, quick) = self.chat_models(Purpose::Ask)?;
-        ask::ask(&self.db, quick.as_ref(), question, range, meeting_id).await
+        ask::ask(
+            &self.db,
+            quick.as_ref(),
+            self.search_embed(),
+            question,
+            range,
+            meeting_id,
+        )
+        .await
     }
 
     pub fn list_asks(&self, limit: u32) -> Result<Vec<AskAnswer>> {
@@ -959,6 +1025,16 @@ pub async fn download_notes_model(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn search_model_status(state: State<'_, AppState>) -> Result<bool> {
+    Ok(state.search_model_ready())
+}
+
+#[tauri::command]
+pub async fn download_search_model(state: State<'_, AppState>) -> Result<()> {
+    state.download_search_model().await
+}
+
+#[tauri::command]
 pub async fn audio_size(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<Option<u64>> {
     Ok(state.audio_size(meeting_id))
 }
@@ -1086,6 +1162,55 @@ mod tests {
         }
     }
 
+    fn test_search_model() -> Arc<ModelManager<LocalEmbedder>> {
+        Arc::new(ModelManager::new(
+            Box::new(|p| LocalEmbedder::load(p).map(Arc::new)),
+            crate::model_manager::EMBED_IDLE,
+        ))
+    }
+
+    /// Writes an empty file with the size of the search model, so it counts as downloaded.
+    fn fake_search_model(state: &AppState) {
+        let dir = search_model_dir(&state.models_root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = &search_model_files()[0];
+        std::fs::File::create(dir.join(&file.name))
+            .unwrap()
+            .set_len(file.size)
+            .unwrap();
+    }
+
+    #[test]
+    fn search_model_status_is_false_without_the_file() {
+        let (_d, state) = state();
+        assert!(!state.search_model_ready());
+        assert!(state.search_embed().is_none());
+    }
+
+    #[test]
+    fn search_model_status_is_true_with_the_file() {
+        let (_d, state) = state();
+        fake_search_model(&state);
+        assert!(state.search_model_ready());
+        assert!(state.search_embed().is_some());
+    }
+
+    #[test]
+    fn indexing_at_start_up_indexes_old_meetings() {
+        let (_d, state, sink) = state_with_sink();
+        {
+            let conn = state.db.lock().unwrap();
+            let id = crate::db::meetings::create_meeting(&conn, "Old", 1).unwrap();
+            crate::db::meetings::save_note(&conn, id, "budget ok", "m").unwrap();
+            crate::db::meetings::set_status(&conn, id, MeetingStatus::Done).unwrap();
+        }
+        state.start_indexing().join().unwrap();
+        assert_eq!(
+            sink.named(crate::events::SEARCH_PROGRESS).last().unwrap()["done"],
+            1
+        );
+    }
+
     fn test_notes_model() -> Arc<ModelManager<LocalLlm>> {
         Arc::new(ModelManager::new(
             Box::new(|p| LocalLlm::load(p).map(Arc::new)),
@@ -1106,6 +1231,7 @@ mod tests {
             LocalModels {
                 root: dir.path().join("models"),
                 notes_model: test_notes_model(),
+                search_model: test_search_model(),
             },
         );
         (dir, state)
@@ -1125,6 +1251,7 @@ mod tests {
             LocalModels {
                 root: dir.path().join("models"),
                 notes_model: test_notes_model(),
+                search_model: test_search_model(),
             },
         );
         (dir, Arc::new(state), sink)

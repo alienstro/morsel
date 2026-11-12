@@ -68,6 +68,8 @@ export const api = {
   downloadModel: () => invoke<void>("download_model"),
   notesModelStatus: () => invoke<boolean>("notes_model_status"),
   downloadNotesModel: () => invoke<void>("download_notes_model"),
+  searchModelStatus: () => invoke<boolean>("search_model_status"),
+  downloadSearchModel: () => invoke<void>("download_search_model"),
   /** The size in bytes of the saved audio of a meeting, or null when it has none. */
   audioSize: (meetingId: number) => invoke<number | null>("audio_size", { meetingId }),
   deleteAudio: (meetingId: number) => invoke<void>("delete_audio", { meetingId }),
@@ -117,6 +119,9 @@ export const onTranscribeProgress = (h: (e: { meetingId: number; doneMs: number;
   on("transcribe://progress", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
 export const onNotesModelDownload = (h: (e: { received: number; total: number }) => void) => on("notes-model://download", h);
+export const onSearchModelDownload = (h: (e: { received: number; total: number }) => void) => on("search-model://download", h);
+/** The search index: the meetings or parts done so far, and the total. */
+export const onSearchProgress = (h: (e: { done: number; total: number }) => void) => on("search://progress", h);
 
 /** The text to show for any error from a command. */
 export function errorMessage(error: unknown): string {

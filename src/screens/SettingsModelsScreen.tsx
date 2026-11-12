@@ -1,6 +1,16 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
-import { LOCAL_MODEL, type ModelDownload, type ModelInfo, NOTES_MODEL, useLocalModel, useNotesModel } from "../lib/localModel";
+import {
+  LOCAL_MODEL,
+  type ModelDownload,
+  type ModelInfo,
+  NOTES_MODEL,
+  SEARCH_MODEL,
+  useLocalModel,
+  useNotesModel,
+  useSearchIndex,
+  useSearchModel,
+} from "../lib/localModel";
 import { TIMING_CHOICES } from "../lib/transcribeTiming";
 import "./note/note.css";
 
@@ -54,6 +64,8 @@ export function SettingsModelsScreen() {
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
   const model = useLocalModel();
   const notesModel = useNotesModel();
+  const searchModel = useSearchModel();
+  const searchIndex = useSearchIndex();
   const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
@@ -119,6 +131,8 @@ export function SettingsModelsScreen() {
             </div>
           </>
         )}
+        <LocalModelField model={searchModel} info={SEARCH_MODEL} action="Download the search model" />
+        {searchIndex && <p className="muted small" style={{ margin: 0 }}>Search index: {searchIndex.done} of {searchIndex.total}</p>}
         {usage && <p className="muted small" style={{ margin: 0 }}>{usageText(usage)}</p>}
       </section>
 

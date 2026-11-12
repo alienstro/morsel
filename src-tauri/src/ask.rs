@@ -6,9 +6,13 @@ use crate::db::meetings::{get_meeting, record_usage};
 use crate::db::{SharedDb, now_ms};
 use crate::llm::ChatMessage;
 use crate::notes::prompt::transcript_text;
+use crate::search::embed::query_text;
+use crate::search::hybrid::{PartHit, search_parts};
+use crate::search::index::Embed;
 use crate::types::{MeetingId, MorselError, Result};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// The most meetings that one answer reads.
 pub const MAX_MEETINGS: usize = 8;
@@ -53,7 +57,7 @@ const SYSTEM: &str = "You answer questions about the user's meetings.\n\
 
 impl AskRange {
     /// The earliest start time that the range includes.
-    fn since(self, now_ms: i64) -> i64 {
+    pub fn since(self, now_ms: i64) -> i64 {
         match self {
             AskRange::All => i64::MIN,
             AskRange::Week => now_ms - 7 * DAY_MS,
@@ -124,11 +128,94 @@ fn meeting_block(
     Ok((source, block))
 }
 
+/// The embedding of the question, or `None` when the search model fails: then Ask
+/// uses keywords only.
+async fn question_vector(embed: Arc<dyn Embed>, question: &str) -> Option<Vec<f32>> {
+    let text = query_text(question);
+    let job = tokio::task::spawn_blocking(move || embed.embed(&[text]));
+    match job.await {
+        Ok(Ok(mut vectors)) if !vectors.is_empty() => Some(vectors.remove(0)),
+        Ok(Ok(_)) => None,
+        Ok(Err(err)) => {
+            eprintln!("the search model failed, so Ask uses keywords only: {err}");
+            None
+        }
+        Err(err) => {
+            eprintln!("the search model job stopped, so Ask uses keywords only: {err}");
+            None
+        }
+    }
+}
+
+/// Whole meetings, each with an equal share of `budget_chars`.
+fn meeting_blocks(
+    conn: &Connection,
+    ids: &[MeetingId],
+    budget_chars: usize,
+) -> Result<(Vec<AskSource>, Vec<String>)> {
+    let share = if ids.is_empty() {
+        0
+    } else {
+        budget_chars / ids.len()
+    };
+    let mut sources = Vec::with_capacity(ids.len());
+    let mut blocks = Vec::with_capacity(ids.len());
+    for &id in ids {
+        let (source, block) = meeting_block(conn, id, share)?;
+        sources.push(source);
+        blocks.push(block);
+    }
+    Ok((sources, blocks))
+}
+
+/// The found parts in rank order, as long as they fit in `budget_chars`, grouped by
+/// meeting. Each meeting is one source, in the order of its best part.
+fn part_blocks(
+    conn: &Connection,
+    hits: &[PartHit],
+    budget_chars: usize,
+) -> Result<(Vec<AskSource>, Vec<String>)> {
+    let mut order: Vec<MeetingId> = Vec::new();
+    let mut texts: Vec<Vec<&str>> = Vec::new();
+    let mut used = 0;
+    for hit in hits {
+        let len = hit.text.chars().count();
+        if used + len > budget_chars {
+            continue;
+        }
+        used += len;
+        match order.iter().position(|&m| m == hit.meeting) {
+            Some(i) => texts[i].push(&hit.text),
+            None => {
+                order.push(hit.meeting);
+                texts.push(vec![&hit.text]);
+            }
+        }
+    }
+    let mut sources = Vec::with_capacity(order.len());
+    let mut blocks = Vec::with_capacity(order.len());
+    for (id, parts) in order.into_iter().zip(texts) {
+        let (title, started_at, date): (String, i64, String) = conn.query_row(
+            "SELECT title, started_at, date(started_at / 1000, 'unixepoch') FROM meetings WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        blocks.push(format!("Meeting: {title} ({date})\n{}\n", parts.join("\n")));
+        sources.push(AskSource {
+            meeting_id: id,
+            title,
+            started_at,
+        });
+    }
+    Ok((sources, blocks))
+}
+
 /// Answers a question from the best meetings, or from one meeting when `meeting` is set.
 /// A question across meetings is saved; a question about one meeting is not.
 pub async fn ask(
     db: &SharedDb,
     model: &dyn ChatModel,
+    embed: Option<Arc<dyn Embed>>,
     question: &str,
     range: AskRange,
     meeting: Option<MeetingId>,
@@ -137,25 +224,26 @@ pub async fn ask(
     if question.is_empty() {
         return Err(MorselError::Invalid("type a question first".into()));
     }
+    let query = match (meeting, embed) {
+        (None, Some(embed)) => question_vector(embed, &question).await,
+        _ => None,
+    };
     let (sources, blocks) = {
         let conn = db.lock().expect("db lock");
-        let ids = match meeting {
-            Some(id) => vec![id],
-            None => find_meetings(&conn, &question, range, now_ms())?,
+        let budget_chars = model.budget().ask * 4;
+        let hits = match meeting {
+            Some(_) => Vec::new(),
+            None => search_parts(&conn, &question, query.as_deref(), range, now_ms())?,
         };
-        let share = if ids.is_empty() {
-            0
+        if hits.is_empty() {
+            let ids = match meeting {
+                Some(id) => vec![id],
+                None => find_meetings(&conn, &question, range, now_ms())?,
+            };
+            meeting_blocks(&conn, &ids, budget_chars)?
         } else {
-            model.budget().ask * 4 / ids.len()
-        };
-        let mut sources = Vec::with_capacity(ids.len());
-        let mut blocks = Vec::with_capacity(ids.len());
-        for id in ids {
-            let (source, block) = meeting_block(&conn, id, share)?;
-            sources.push(source);
-            blocks.push(block);
+            part_blocks(&conn, &hits, budget_chars)?
         }
-        (sources, blocks)
     };
 
     let answer = if sources.is_empty() {
@@ -279,6 +367,135 @@ mod tests {
         );
     }
 
+    /// A finished meeting with 120 transcript lines about the roadmap, and one line,
+    /// line 60, from `special`. Its parts are in the search index.
+    fn long_meeting(db: &SharedDb, title: &str, special: &str) -> MeetingId {
+        let id = meeting(db, title, now_ms() - DAY, "");
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("DELETE FROM notes WHERE meeting_id = ?1", [id])
+                .unwrap();
+            for i in 0..120u64 {
+                let text = if i == 60 {
+                    special.to_owned()
+                } else {
+                    format!("line {i:03} about the roadmap")
+                };
+                let line = TranscriptLine {
+                    meeting_id: id,
+                    speaker: Speaker::Others,
+                    start_ms: i * 5_000,
+                    end_ms: i * 5_000 + 4_000,
+                    text,
+                };
+                add_line(&conn, &line).unwrap();
+            }
+        }
+        crate::search::index::index_meeting(db, None, id).unwrap();
+        id
+    }
+
+    /// The user message of the one model call.
+    async fn sent_context(server: &MockServer) -> String {
+        let body: serde_json::Value =
+            serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
+        body["messages"][1]["content"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn ask_sends_only_the_found_parts_grouped_by_meeting() {
+        let (_d, db) = temp_db();
+        long_meeting(&db, "Pricing call", "Acme wants a discount");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(reply("10% off."))
+            .mount(&server)
+            .await;
+        ask(&db, &config(&server), None, "discount", AskRange::All, None)
+            .await
+            .unwrap();
+        let context = sent_context(&server).await;
+        assert!(context.contains("Meeting: Pricing call"), "{context}");
+        assert!(context.contains("Acme wants a discount"));
+        assert!(!context.contains("line 000 "), "{context}");
+        assert!(!context.contains("line 119 "), "{context}");
+    }
+
+    #[tokio::test]
+    async fn ask_lists_each_source_meeting_once() {
+        let (_d, db) = temp_db();
+        let id = long_meeting(&db, "Roadmap", "the roadmap again");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(reply("Ship it."))
+            .mount(&server)
+            .await;
+        let answer = ask(&db, &config(&server), None, "roadmap", AskRange::All, None)
+            .await
+            .unwrap();
+        assert_eq!(answer.sources.len(), 1);
+        assert_eq!(answer.sources[0].meeting_id, id);
+    }
+
+    #[tokio::test]
+    async fn ask_without_the_search_model_uses_keywords() {
+        let (_d, db) = temp_db();
+        let id = long_meeting(&db, "Pricing call", "Acme wants a discount");
+        long_meeting(&db, "Other", "nothing to see");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(reply("10% off."))
+            .mount(&server)
+            .await;
+        let answer = ask(&db, &config(&server), None, "discount", AskRange::All, None)
+            .await
+            .unwrap();
+        let ids: Vec<MeetingId> = answer.sources.iter().map(|s| s.meeting_id).collect();
+        assert_eq!(ids, vec![id]);
+    }
+
+    /// Points texts about the launch one way, and all other texts another way.
+    struct LaunchEmbed;
+
+    impl Embed for LaunchEmbed {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    if t.contains("launch") || t.contains("Marso") {
+                        vec![1.0, 0.0]
+                    } else {
+                        vec![0.0, 1.0]
+                    }
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_finds_a_part_by_meaning_with_the_search_model() {
+        let (_d, db) = temp_db();
+        let id = long_meeting(&db, "Sync", "ilipat natin sa Marso 29");
+        crate::search::index::index_meeting(&db, Some(&LaunchEmbed), id).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(reply("March 29."))
+            .mount(&server)
+            .await;
+        ask(
+            &db,
+            &config(&server),
+            Some(Arc::new(LaunchEmbed)),
+            "when is the launch?",
+            AskRange::All,
+            None,
+        )
+        .await
+        .unwrap();
+        let context = sent_context(&server).await;
+        assert!(context.contains("ilipat natin sa Marso 29"), "{context}");
+    }
+
     #[tokio::test]
     async fn ask_sends_only_found_meetings_and_returns_sources() {
         let (_d, db) = temp_db();
@@ -295,6 +512,7 @@ mod tests {
         let answer = ask(
             &db,
             &config(&server),
+            None,
             " What did Acme say about the discount? ",
             AskRange::All,
             None,
@@ -334,6 +552,7 @@ mod tests {
         let answer = ask(
             &db,
             &config(&server),
+            None,
             "What about the discount?",
             AskRange::All,
             None,
@@ -367,7 +586,7 @@ mod tests {
             }
         }
         let fake = FakeChat::new(Budget::LOCAL, "ok");
-        ask(&db, &fake, "discount", AskRange::All, None)
+        ask(&db, &fake, None, "discount", AskRange::All, None)
             .await
             .unwrap();
         let calls = fake.calls();
@@ -401,7 +620,7 @@ mod tests {
             .respond_with(reply("ok"))
             .mount(&server)
             .await;
-        ask(&db, &config(&server), "discount", AskRange::All, None)
+        ask(&db, &config(&server), None, "discount", AskRange::All, None)
             .await
             .unwrap();
         let body = &server.received_requests().await.unwrap()[0].body;
@@ -425,6 +644,7 @@ mod tests {
         let answer = ask(
             &db,
             &config(&server),
+            None,
             "Who is blocked?",
             AskRange::All,
             Some(id),

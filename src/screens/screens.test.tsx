@@ -162,6 +162,26 @@ describe("SettingsModelsScreen", () => {
     expect(await screen.findByText("Downloading: 25%")).toBeInTheDocument();
   });
 
+  it("settings_shows_the_search_model_and_its_download", async () => {
+    responses.search_model_status = false;
+    responses.download_search_model = () => new Promise(() => {});
+    renderAt("/settings/models");
+    expect(await screen.findByText(/EmbeddingGemma 2 search model \(310 MB\): not downloaded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download the search model" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("download_search_model"));
+    act(() => emit("search-model://download", { received: 155_000_000, total: 310_000_000 }));
+    expect(await screen.findByText("Downloading: 50%")).toBeInTheDocument();
+  });
+
+  it("settings_shows_the_index_progress", async () => {
+    renderAt("/settings/models");
+    await screen.findByText(/EmbeddingGemma 2 search model/);
+    act(() => emit("search://progress", { done: 3, total: 10 }));
+    expect(await screen.findByText("Search index: 3 of 10")).toBeInTheDocument();
+    act(() => emit("search://progress", { done: 10, total: 10 }));
+    await vi.waitFor(() => expect(screen.queryByText(/Search index:/)).not.toBeInTheDocument());
+  });
+
   it("cloud_mode_shows_the_key_fields", async () => {
     renderAt("/settings/models");
     expect(await screen.findByLabelText("Notes API key")).toBeInTheDocument();

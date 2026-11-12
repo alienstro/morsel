@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { api, errorMessage, type Settings } from "../../lib/api";
-import { downloadStateText, LOCAL_MODEL, NOTES_MODEL, useLocalModel, useNotesModel } from "../../lib/localModel";
+import {
+  downloadStateText,
+  LOCAL_DOWNLOAD_TOTAL,
+  LOCAL_MODEL,
+  NOTES_MODEL,
+  SEARCH_MODEL,
+  useLocalModel,
+  useNotesModel,
+  useSearchModel,
+} from "../../lib/localModel";
 import { TIMING_CHOICES } from "../../lib/transcribeTiming";
 import { OnboardingLayout } from "./OnboardingLayout";
 
@@ -15,6 +24,7 @@ export function AiStep() {
   const [groqKey, setGroqKey] = useState("");
   const model = useLocalModel();
   const notesModel = useNotesModel();
+  const searchModel = useSearchModel();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,7 +70,20 @@ export function AiStep() {
   const local = settings.transcribeMode === "local";
   const state = downloadStateText(model);
   const localNotes = settings.notesMode !== "cloud";
-  const notesState = downloadStateText(notesModel);
+  const searchState = downloadStateText(searchModel);
+  // The notes model comes first, then the search model.
+  const notesState = !notesModel.ready
+    ? downloadStateText(notesModel)
+    : searchModel.ready
+      ? "Ready"
+      : searchState && `Search model: ${searchState.charAt(0).toLowerCase()}${searchState.slice(1)}`;
+  const downloadLabel = notesModel.ready
+    ? `Download the search model (${SEARCH_MODEL.size})`
+    : `Download the models (${LOCAL_DOWNLOAD_TOTAL})`;
+  const downloadLocal = async () => {
+    if (!notesModel.ready && !(await notesModel.download())) return;
+    await searchModel.download();
+  };
 
   return (
     <OnboardingLayout
@@ -132,12 +155,14 @@ export function AiStep() {
             <span>
               <span className="choice-title">On this Mac: {NOTES_MODEL.name}</span>
               <span className="muted small" style={{ display: "block" }}>
-                Free, private, {NOTES_MODEL.size}. {NOTES_MODEL.about}
+                Free, private, {NOTES_MODEL.size} plus the {SEARCH_MODEL.size} search model: {LOCAL_DOWNLOAD_TOTAL} in all. {NOTES_MODEL.about}
               </span>
               {localNotes && (notesState
                 ? <span className="small" style={{ display: "block" }}>{notesState}</span>
-                : <button type="button" className="btn" style={{ marginTop: 6 }} onClick={notesModel.download}>Download the notes model</button>)}
-              {localNotes && notesModel.error && <span role="alert" className="error-text small" style={{ display: "block" }}>{notesModel.error}</span>}
+                : <button type="button" className="btn" style={{ marginTop: 6 }} onClick={downloadLocal}>{downloadLabel}</button>)}
+              {localNotes && (notesModel.error ?? searchModel.error) && (
+                <span role="alert" className="error-text small" style={{ display: "block" }}>{notesModel.error ?? searchModel.error}</span>
+              )}
             </span>
           </label>
           <label className={`choice${!localNotes ? " selected" : ""}`}>

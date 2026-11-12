@@ -132,10 +132,25 @@ describe("AI step", () => {
     renderAt("/welcome/2");
     expect(await screen.findByRole("radio", { name: /^On this Mac: MiniCPM-V-4.*2\.96 GB/ })).toBeChecked();
     expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Download the notes model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download the models (3.27 GB)" }));
     await waitFor(() => expect(calls("download_notes_model")).toHaveLength(1));
     act(() => emit("notes-model://download", { received: 740 * 1_000_000, total: 2960 * 1_000_000 }));
     expect(await screen.findByText("Downloading, 740 of 2960 MB")).toBeInTheDocument();
+  });
+
+  it("ai_step_states_the_total_download_size", async () => {
+    let finishNotes = () => {};
+    responses.download_notes_model = () => new Promise<void>((resolve) => (finishNotes = resolve));
+    responses.download_search_model = () => new Promise(() => {});
+    renderAt("/welcome/2");
+    expect(await screen.findByRole("radio", { name: /3\.27 GB in all/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Download the models (3.27 GB)" }));
+    await waitFor(() => expect(calls("download_notes_model")).toHaveLength(1));
+    expect(calls("download_search_model")).toHaveLength(0);
+    act(() => finishNotes());
+    await waitFor(() => expect(calls("download_search_model")).toHaveLength(1));
+    act(() => emit("search-model://download", { received: 155 * 1_000_000, total: 310 * 1_000_000 }));
+    expect(await screen.findByText("Search model: downloading, 155 of 310 MB")).toBeInTheDocument();
   });
 
   it("ai_step_back_goes_to_step_1", async () => {

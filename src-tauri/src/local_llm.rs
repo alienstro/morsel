@@ -55,7 +55,7 @@ pub fn fit_prompt<T>(mut tokens: Vec<T>, n_ctx: u32, max_tokens: u32) -> Vec<T> 
 }
 
 /// llama.cpp allows one backend for each process.
-fn backend() -> Result<&'static LlamaBackend> {
+pub(crate) fn backend() -> Result<&'static LlamaBackend> {
     static BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
     if let Some(b) = BACKEND.get() {
         return Ok(b);

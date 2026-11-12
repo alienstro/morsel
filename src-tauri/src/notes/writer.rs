@@ -10,6 +10,7 @@ use crate::db::meetings::{UNTITLED, get_meeting, record_usage, save_note, set_st
 use crate::db::templates;
 use crate::events::{EventSink, NOTES_DONE, NOTES_FAILED, STATUS};
 use crate::llm::ChatMessage;
+use crate::search::index::{Embed, index_meeting};
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
 use serde_json::json;
 use std::sync::Arc;
@@ -20,6 +21,8 @@ pub struct NotesContext {
     pub sink: Arc<dyn EventSink>,
     pub notes: Arc<dyn ChatModel>,
     pub quick: Arc<dyn ChatModel>,
+    /// The search model, or `None` when it is not downloaded.
+    pub embed: Option<Arc<dyn Embed>>,
 }
 
 impl NotesContext {
@@ -64,6 +67,7 @@ pub async fn write_notes(
         Ok(()) => {
             ctx.set(id, MeetingStatus::Done);
             ctx.sink.emit(NOTES_DONE, json!({ "meetingId": id }));
+            index_after_notes(ctx, id).await;
         }
         Err(MorselError::Cancelled) => ctx.set(id, MeetingStatus::NotesCancelled),
         Err(err) => {
@@ -75,6 +79,18 @@ pub async fn write_notes(
         }
     }
     result
+}
+
+/// Indexes the meeting for Ask. The note is already saved, so a failure only logs.
+async fn index_after_notes(ctx: &NotesContext, id: MeetingId) {
+    let db = ctx.db.clone();
+    let embed = ctx.embed.clone();
+    let job = tokio::task::spawn_blocking(move || index_meeting(&db, embed.as_deref(), id));
+    match job.await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => eprintln!("cannot index meeting {id} for search: {err}"),
+        Err(err) => eprintln!("the search index job of meeting {id} stopped: {err}"),
+    }
 }
 
 async fn run(
@@ -203,6 +219,7 @@ mod tests {
             sink: sink.clone(),
             notes: cfg("notes-model"),
             quick: cfg("quick-model"),
+            embed: None,
         };
         Fixture {
             _dir: dir,
@@ -265,6 +282,29 @@ mod tests {
         assert_eq!(detail.summary.status, MeetingStatus::Done);
         assert_eq!(detail.summary.title, "Weekly sync");
         assert_eq!(f.sink.named(NOTES_DONE)[0]["meetingId"], f.id);
+    }
+
+    #[tokio::test]
+    async fn a_saved_note_indexes_its_meeting() {
+        let server = MockServer::start().await;
+        mount_ok(&server).await;
+        let f = fixture(&server, "Weekly sync", 3, 20);
+        write_notes(&f.ctx, f.id, 1, CancellationToken::new())
+            .await
+            .unwrap();
+        let texts: Vec<String> = f
+            .ctx
+            .db
+            .lock()
+            .unwrap()
+            .prepare("SELECT text FROM chunks WHERE meeting_id = ?1 ORDER BY part")
+            .unwrap()
+            .query_map([f.id], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(texts.len() > 1, "{texts:?}");
+        assert!(texts.last().unwrap().contains("budget ok"));
     }
 
     #[tokio::test]

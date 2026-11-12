@@ -11,6 +11,7 @@ pub mod local_llm;
 pub mod model_manager;
 pub mod notes;
 pub mod permissions;
+pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod settings;
@@ -70,6 +71,8 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::download_model,
             commands::notes_model_status,
             commands::download_notes_model,
+            commands::search_model_status,
+            commands::download_search_model,
             commands::audio_size,
             commands::delete_audio,
             commands::search_notes,
@@ -112,12 +115,12 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         eprintln!("marked {interrupted} meeting(s) as interrupted");
     }
     let http = reqwest::Client::new();
-    // A debug build gets a new code signature on each rebuild, so the Keychain asks again each time.
-    #[cfg(debug_assertions)]
-    let secrets: Arc<dyn SecretStore> =
-        Arc::new(secrets::FileStore::new(&data_dir.join("secrets.json")));
-    #[cfg(not(debug_assertions))]
-    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::KeychainStore);
+    // Each build gets a new ad-hoc signature, so the Keychain would ask for the password after
+    // each update. The keys live in an owner-only file, and older Keychain keys move there once.
+    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::open_file_store(
+        &data_dir.join("secrets.json"),
+        &secrets::KeychainStore,
+    ));
     // Whisper Turbo has its own folder in here. Older versions also put Parakeet here.
     let models_root = transcribe::model_download::models_root(&data_dir);
     transcribe::model_download::remove_old_models(&models_root);
@@ -150,8 +153,13 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         commands::LocalModels {
             root: models_root,
             notes_model,
+            search_model: Arc::new(model_manager::ModelManager::new(
+                Box::new(|path| search::embed::LocalEmbedder::load(path).map(Arc::new)),
+                model_manager::EMBED_IDLE,
+            )),
         },
     ));
+    app.state::<AppState>().start_indexing();
     start_after_jobs(app.handle().clone())?;
     start_calendar_poll(calendar.clone());
     app.manage(calendar::reminder::ReminderState::default());
@@ -227,5 +235,40 @@ mod tests {
         let app = super::configure(tauri::test::mock_builder())
             .build(tauri::test::mock_context(tauri::test::noop_assets()));
         assert!(app.is_ok());
+    }
+
+    /// The command names inside the first `[ ... ]` after `marker`, without module paths.
+    fn names_after(source: &str, marker: &str) -> std::collections::BTreeSet<String> {
+        let start = source.find(marker).expect("marker") + marker.len();
+        let body = &source[start..];
+        let body = &body[body.find('[').expect("[") + 1..body.find(']').expect("]")];
+        body.split(',')
+            .map(|s| s.trim().trim_matches('"').rsplit("::").next().unwrap_or("").to_owned())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// Tauri refuses a command with "not allowed by ACL" unless `build.rs` lists it
+    /// and a capability allows it. This test finds a missing entry before the app runs.
+    #[test]
+    fn each_command_is_listed_and_allowed() {
+        let handler = names_after(include_str!("lib.rs"), "generate_handler!");
+        let listed = names_after(include_str!("../build.rs"), "COMMANDS: &[&str] = &");
+        let mut allowed = std::collections::BTreeSet::new();
+        for file in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities/reminder.json"),
+        ] {
+            let caps: serde_json::Value = serde_json::from_str(file).expect("capability JSON");
+            for p in caps["permissions"].as_array().expect("permissions") {
+                if let Some(name) = p.as_str().and_then(|s| s.strip_prefix("allow-")) {
+                    allowed.insert(name.replace('-', "_"));
+                }
+            }
+        }
+        let not_listed: Vec<_> = handler.difference(&listed).collect();
+        let not_allowed: Vec<_> = handler.difference(&allowed).collect();
+        assert!(not_listed.is_empty(), "add to COMMANDS in build.rs: {not_listed:?}");
+        assert!(not_allowed.is_empty(), "add allow-<name> to a capability: {not_allowed:?}");
     }
 }

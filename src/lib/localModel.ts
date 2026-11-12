@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, onModelDownload, onNotesModelDownload } from "./api";
+import { api, errorMessage, onModelDownload, onNotesModelDownload, onSearchModelDownload, onSearchProgress } from "./api";
 
 export type ModelInfo = { name: string; size: string; about: string };
 
@@ -13,6 +13,16 @@ export const NOTES_MODEL: ModelInfo = {
   about: "Writes the notes and answers questions on this Mac. No meeting text leaves it.",
 };
 
+/** The on-device search model. It finds the parts of the meetings that Ask reads. */
+export const SEARCH_MODEL: ModelInfo = {
+  name: "EmbeddingGemma 2 search",
+  size: "310 MB",
+  about: "Finds the parts of your meetings that answer a question in Ask, on this Mac.",
+};
+
+/** The notes model and the search model together. */
+export const LOCAL_DOWNLOAD_TOTAL = "3.27 GB";
+
 export type Progress = { received: number; total: number };
 
 type ModelSource = {
@@ -23,6 +33,7 @@ type ModelSource = {
 
 const WHISPER: ModelSource = { status: api.modelStatus, download: api.downloadModel, onProgress: onModelDownload };
 const NOTES: ModelSource = { status: api.notesModelStatus, download: api.downloadNotesModel, onProgress: onNotesModelDownload };
+const SEARCH: ModelSource = { status: api.searchModelStatus, download: api.downloadSearchModel, onProgress: onSearchModelDownload };
 
 /** The download state of one on-device model. */
 function useModelDownload(source: ModelSource) {
@@ -39,15 +50,18 @@ function useModelDownload(source: ModelSource) {
     };
   }, [source]);
 
-  const download = async () => {
+  /** Downloads the model. Resolves to true when the model is ready. */
+  const download = async (): Promise<boolean> => {
     setError(null);
     setDownloading(true);
     setProgress({ received: 0, total: 0 });
     try {
       await source.download();
       setReady(true);
+      return true;
     } catch (e) {
       setError(errorMessage(e));
+      return false;
     } finally {
       setDownloading(false);
       setProgress(null);
@@ -64,6 +78,23 @@ export const useLocalModel = () => useModelDownload(WHISPER);
 
 /** The download state of the on-device notes model. */
 export const useNotesModel = () => useModelDownload(NOTES);
+
+/** The download state of the on-device search model. */
+export const useSearchModel = () => useModelDownload(SEARCH);
+
+export type IndexProgress = { done: number; total: number };
+
+/** The search index while it runs, or null when it is idle or complete. */
+export function useSearchIndex(): IndexProgress | null {
+  const [progress, setProgress] = useState<IndexProgress | null>(null);
+  useEffect(() => {
+    const off = onSearchProgress((p) => setProgress(p.done < p.total ? p : null));
+    return () => {
+      off.then((f) => f());
+    };
+  }, []);
+  return progress;
+}
 
 const MB = 1_000_000;
 
