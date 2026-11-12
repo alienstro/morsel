@@ -219,7 +219,17 @@ mod parts {
     }
 
     #[test]
-    fn meetings_without_parts_lists_only_done_meetings() {
+    fn meetings_without_parts_includes_meetings_whose_notes_failed_or_stopped() {
+        let (_d, conn) = temp_db();
+        let failed = create_meeting(&conn, "Failed", 1).unwrap();
+        set_status(&conn, failed, MeetingStatus::NotesFailed).unwrap();
+        let cancelled = create_meeting(&conn, "Cancelled", 1).unwrap();
+        set_status(&conn, cancelled, MeetingStatus::NotesCancelled).unwrap();
+        assert_eq!(meetings_without_parts(&conn).unwrap(), vec![failed, cancelled]);
+    }
+
+    #[test]
+    fn meetings_without_parts_skips_running_and_indexed_meetings() {
         let (_d, conn) = temp_db();
         let done = create_meeting(&conn, "Done", 1).unwrap();
         set_status(&conn, done, MeetingStatus::Done).unwrap();

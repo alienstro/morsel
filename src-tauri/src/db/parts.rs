@@ -64,11 +64,14 @@ pub fn decode_embedding(blob: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-/// Finished meetings that have no parts yet, oldest first.
+/// Meetings with a complete transcript and no parts yet, oldest first. A meeting
+/// whose notes failed or were cancelled still has its transcript, so it counts.
 pub fn meetings_without_parts(conn: &Connection) -> Result<Vec<MeetingId>> {
     let mut stmt = conn.prepare(
-        "SELECT m.id FROM meetings m WHERE m.status = 'done' \
-         AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id = m.id) ORDER BY m.started_at",
+        "SELECT m.id FROM meetings m \
+         WHERE m.status IN ('done', 'notes_failed', 'notes_cancelled') \
+         AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id = m.id) \
+         ORDER BY m.started_at, m.id",
     )?;
     let ids = stmt
         .query_map([], |r| r.get(0))?
