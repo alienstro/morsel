@@ -1,5 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, onModelDownload, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
+import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
+import { LOCAL_MODEL, useLocalModel } from "../lib/localModel";
+import { TIMING_CHOICES } from "../lib/transcribeTiming";
 import "./note/note.css";
 
 type KeyFieldProps = { account: KeyAccount; label: string };
@@ -50,19 +52,12 @@ export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
-  const [modelReady, setModelReady] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const model = useLocalModel();
   const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
     api.usageSummary().then(setUsage).catch(() => {});
     api.getSettings().then(setSettings).catch((e) => setMessage(errorMessage(e)));
-    api.modelStatus().then(setModelReady).catch(() => {});
-    const off = onModelDownload(({ received, total }) => total > 0 && setProgress(Math.floor((received / total) * 100)));
-    return () => {
-      off.then((f) => f());
-    };
   }, []);
 
   if (!settings) return <p className="muted page">{message ?? "Loading the settings…"}</p>;
@@ -86,19 +81,6 @@ export function SettingsModelsScreen() {
       setKeyMessage("The key works.");
     } catch (e) {
       setKeyMessage(errorMessage(e));
-    }
-  };
-
-  const download = async () => {
-    setDownloadError(null);
-    setProgress(0);
-    try {
-      await api.downloadModel();
-      setModelReady(true);
-      setProgress(null);
-    } catch (e) {
-      setDownloadError(errorMessage(e));
-      setProgress(null);
     }
   };
 
@@ -136,19 +118,7 @@ export function SettingsModelsScreen() {
           <label><input type="radio" name="mode" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} /> Cloud (your key)</label>
         </fieldset>
         {settings.transcribeMode === "local" ? (
-          <div className="field">
-            <span>Parakeet model (about 670 MB): {modelReady ? "ready" : "not downloaded"}</span>
-            {!modelReady && progress === null && (
-              <button type="button" className="btn" onClick={download}>Download the model</button>
-            )}
-            {progress !== null && (
-              <>
-                <progress max={100} value={progress} />
-                <span className="small">Downloading: {progress}%</span>
-              </>
-            )}
-            {downloadError && <span role="alert" className="error-text small">{downloadError}</span>}
-          </div>
+          <LocalModelField model={model} />
         ) : (
           <>
             <div className="field">
@@ -162,6 +132,15 @@ export function SettingsModelsScreen() {
             <KeyField account="transcribe_api_key" label="Transcription API key" />
           </>
         )}
+        <fieldset className="field">
+          <legend>When to transcribe</legend>
+          {TIMING_CHOICES.map((choice) => (
+            <label key={choice.value}>
+              <input type="radio" name="timing" checked={settings.transcribeTiming === choice.value} onChange={() => set("transcribeTiming", choice.value)} />{" "}
+              {choice.title}: <span className="muted small">{choice.about}</span>
+            </label>
+          ))}
+        </fieldset>
         <div className="field">
           <label htmlFor="language">Meeting language ("auto" detects it)</label>
           <input id="language" className="text-input" value={settings.language} onChange={(e) => set("language", e.target.value)} />
@@ -173,5 +152,27 @@ export function SettingsModelsScreen() {
         {message && <span role="status" className="small">{message}</span>}
       </div>
     </form>
+  );
+}
+
+/** The download state of the on-device model, and the download button. */
+function LocalModelField({ model }: { model: ReturnType<typeof useLocalModel> }) {
+  const p = model.downloading ? model.progress : null;
+  const percent = p && p.total > 0 ? Math.floor((p.received / p.total) * 100) : p ? 0 : null;
+  return (
+    <div className="field">
+      <span>{LOCAL_MODEL.name} model ({LOCAL_MODEL.size}): {model.ready ? "ready" : "not downloaded"}</span>
+      <span className="muted small">{LOCAL_MODEL.about}</span>
+      {!model.ready && percent === null && (
+        <button type="button" className="btn" onClick={model.download}>Download the model</button>
+      )}
+      {percent !== null && (
+        <>
+          <progress max={100} value={percent} />
+          <span className="small">Downloading: {percent}%</span>
+        </>
+      )}
+      {model.error && <span role="alert" className="error-text small">{model.error}</span>}
+    </div>
   );
 }

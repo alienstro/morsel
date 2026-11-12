@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local",
+  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
   onboarded: false, remindBeforeMeeting: true, globalShortcut: "CommandOrControl+Shift+M",
 };
@@ -80,8 +80,10 @@ describe("Welcome step", () => {
 describe("AI step", () => {
   it("transcription_options_name_their_languages", async () => {
     renderAt("/welcome/2");
-    expect(await screen.findByText(/25 European languages, not Tagalog/)).toBeInTheDocument();
-    expect(screen.getByText(/Most languages, Tagalog too/)).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: /^On this Mac: Whisper Turbo.*Tagalog too/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Cloud.*Tagalog too/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("radiogroup", { name: "Transcription" })).getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
   it("ai_step_saves_settings_then_tests_the_connection", async () => {
@@ -104,6 +106,14 @@ describe("AI step", () => {
     expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "custom" } });
     expect(screen.getByLabelText("Base URL")).toHaveValue("");
+  });
+
+  it("ai_step_saves_the_after_timing", async () => {
+    renderAt("/welcome/2");
+    expect(await screen.findByRole("radio", { name: /^While the meeting runs/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /^After the meeting.*about 20 minutes/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(calls("save_settings")[0]).toMatchObject({ settings: { transcribeTiming: "after" } }));
   });
 
   it("ai_step_shows_download_progress", async () => {

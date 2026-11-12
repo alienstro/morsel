@@ -52,14 +52,33 @@ export function NoteScreen() {
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [audioBytes, setAudioBytes] = useState<number | null>(null);
+  const [confirmingAudio, setConfirmingAudio] = useState(false);
 
   useEffect(() => {
     api.getMeeting(id).then((d) => {
+      // The after job still transcribes this meeting: the writing page shows its progress.
+      if (d.summary.status === "transcribing") {
+        navigate(`/meeting/${id}/writing`, { replace: true });
+        return;
+      }
       setDetail(d);
       setTemplateId(d.summary.templateId);
     }).catch((e) => setInfo(errorMessage(e)));
     api.listTemplates().then(setTemplates).catch(() => {});
-  }, [id]);
+    api.audioSize(id).then(setAudioBytes).catch(() => {});
+  }, [id, navigate]);
+
+  const deleteAudio = async () => {
+    setConfirmingAudio(false);
+    try {
+      await api.deleteAudio(id);
+      setAudioBytes(null);
+      setInfo("The audio is deleted. The notes and the transcript stay.");
+    } catch (e) {
+      setInfo(errorMessage(e));
+    }
+  };
 
   if (!detail) return <p className="muted page">{info ?? "Loading the note…"}</p>;
 
@@ -144,6 +163,22 @@ export function NoteScreen() {
           ))}
         </ol>
       </details>
+      {audioBytes !== null && (
+        <div className="row">
+          <button type="button" className="btn" onClick={() => setConfirmingAudio(true)}>
+            Delete audio ({Math.max(1, Math.round(audioBytes / 1_000_000))} MB)
+          </button>
+        </div>
+      )}
+      {confirmingAudio && (
+        <ConfirmDialog
+          title="Delete the audio?"
+          body="The recording of this meeting goes away. The notes and the transcript stay. You cannot undo this."
+          confirmLabel="Delete audio"
+          onConfirm={deleteAudio}
+          onCancel={() => setConfirmingAudio(false)}
+        />
+      )}
       {confirming && (
         <ConfirmDialog
           title="Delete this note?"

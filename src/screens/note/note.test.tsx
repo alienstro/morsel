@@ -59,6 +59,18 @@ describe("WritingScreen", () => {
     expect(await screen.findByText(/ask Priya/)).toBeInTheDocument();
   });
 
+  it("writing_page_shows_transcribing_progress", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "transcribing" }, lines: [], userNotes: "", note: null };
+    renderAt("/meeting/1/writing");
+    expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
+    act(() => emit("transcribe://progress", { meetingId: 2, doneMs: 1, totalMs: 2 }));
+    act(() => emit("transcribe://progress", { meetingId: 1, doneMs: 12 * 60_000, totalMs: 60 * 60_000 }));
+    expect(await screen.findByText("Transcribing: 12 of 60 min")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel and keep my notes" })).not.toBeInTheDocument();
+    act(() => emit("meeting://status", { meetingId: 1, status: "writing_notes", warning: null }));
+    expect(await screen.findByText("Morsel is writing the notes…")).toBeInTheDocument();
+  });
+
   it("notes_failed_shows_message_and_try_again", async () => {
     renderAt("/meeting/1/writing");
     await screen.findByRole("button", { name: "Cancel and keep my notes" });
@@ -109,5 +121,33 @@ describe("NoteScreen", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete note" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_meeting", { meetingId: 1 }));
     expect(await screen.findByText("notes page")).toBeInTheDocument();
+  });
+  it("note_page_deletes_the_audio_after_a_confirmation", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
+    responses.audio_size = 230_000_000;
+    responses.delete_audio = null;
+    renderAt("/note/1");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete audio (230 MB)" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the audio?" });
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "delete_audio")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete audio" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_audio", { meetingId: 1 }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Delete audio/ })).not.toBeInTheDocument());
+    expect(screen.getByText("The audio is deleted. The notes and the transcript stay.")).toBeInTheDocument();
+  });
+
+  it("note_page_opens_the_writing_page_while_the_audio_is_transcribed", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "transcribing" }, lines: [], userNotes: "", note: null };
+    renderAt("/note/1");
+    expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
+  });
+
+  it("note_page_has_no_audio_button_without_audio", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
+    responses.audio_size = null;
+    renderAt("/note/1");
+    await screen.findByRole("button", { name: "Delete note" });
+    expect(screen.queryByRole("button", { name: /^Delete audio/ })).not.toBeInTheDocument();
   });
 });

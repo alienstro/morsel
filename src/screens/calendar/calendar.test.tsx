@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../tes
 
 const none = { state: "none", today: 0 };
 const settings = {
-  notesBaseUrl: "", notesModel: "", quickModel: "", transcribeMode: "local", transcribeBaseUrl: "",
+  notesBaseUrl: "", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live", transcribeBaseUrl: "",
   transcribeModel: "", language: "auto", onboarded: false, remindBeforeMeeting: true, globalShortcut: "CommandOrControl+Shift+M",
 };
 

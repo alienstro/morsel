@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Speaker = "you" | "others";
 export type MeetingStatus =
-  | "recording" | "paused" | "stopped" | "writing_notes" | "done"
+  | "recording" | "paused" | "stopped" | "transcribing" | "writing_notes" | "done"
   | "notes_cancelled" | "notes_failed" | "interrupted";
 
 export type TranscriptLine = { meetingId: number; speaker: Speaker; startMs: number; endMs: number; text: string };
@@ -26,7 +26,7 @@ export type AskAnswer = { id: number | null; question: string; answer: string; s
 export type UsageTotal = { promptTokens: number; completionTokens: number; cost: number | null };
 export type DataInfo = { path: string; notes: number; bytes: number };
 export type Settings = {
-  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud";
+  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud"; transcribeTiming: "live" | "after";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
   onboarded: boolean; remindBeforeMeeting: boolean; globalShortcut: string;
 };
@@ -51,7 +51,8 @@ export const api = {
     invoke<number>("start_meeting", { title, templateId, people }),
   pauseMeeting: () => invoke<void>("pause_meeting"),
   resumeMeeting: () => invoke<void>("resume_meeting"),
-  stopMeeting: () => invoke<void>("stop_meeting"),
+  /** Returns the timing of the meeting. In "after" mode, Morsel writes the notes by itself. */
+  stopMeeting: () => invoke<Settings["transcribeTiming"]>("stop_meeting"),
   saveUserNotes: (meetingId: number, body: string) => invoke<void>("save_user_notes", { meetingId, body }),
   writeNotes: (meetingId: number, templateId: number) => invoke<void>("write_notes", { meetingId, templateId }),
   cancelNotes: (meetingId: number) => invoke<boolean>("cancel_notes", { meetingId }),
@@ -65,6 +66,9 @@ export const api = {
   testNotesKey: () => invoke<void>("test_notes_key"),
   modelStatus: () => invoke<boolean>("model_status"),
   downloadModel: () => invoke<void>("download_model"),
+  /** The size in bytes of the saved audio of a meeting, or null when it has none. */
+  audioSize: (meetingId: number) => invoke<number | null>("audio_size", { meetingId }),
+  deleteAudio: (meetingId: number) => invoke<void>("delete_audio", { meetingId }),
   exportNote: (meetingId: number, path: string) => invoke<void>("export_note", { meetingId, path }),
   searchNotes: (filter: NotesFilter) => invoke<NotesPage>("search_notes", { filter }),
   listPeople: () => invoke<string[]>("list_people"),
@@ -107,6 +111,8 @@ export const onNotesDone = (h: (e: { meetingId: number }) => void) => on("notes:
 export const onNotesFailed = (h: (e: { meetingId: number; message: string }) => void) => on("notes://failed", h);
 export const onOpenMeeting = (h: (e: { id: number }) => void) => on("app://open-meeting", h);
 export const onCalendarChanged = (h: () => void) => on("calendar://changed", h);
+export const onTranscribeProgress = (h: (e: { meetingId: number; doneMs: number; totalMs: number }) => void) =>
+  on("transcribe://progress", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
 
 /** The text to show for any error from a command. */

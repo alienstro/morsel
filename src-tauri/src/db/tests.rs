@@ -1,6 +1,7 @@
 use super::meetings::*;
 use super::open;
 use super::templates;
+use crate::settings::TranscribeTiming;
 use crate::types::{MeetingStatus, Speaker, TranscriptLine};
 use rusqlite::Connection;
 
@@ -121,4 +122,20 @@ fn save_note_and_list_meetings_newest_first() {
         .map(|m| m.id)
         .collect();
     assert_eq!(ids, [b, a]);
+}
+
+#[test]
+fn migration_3_adds_the_timing_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = open(&dir.path().join("m.db")).unwrap();
+    let id = create_meeting(&conn, "Sync", 1).unwrap();
+    assert_eq!(timing_of(&conn, id).unwrap(), TranscribeTiming::Live);
+    set_timing(&conn, id, TranscribeTiming::After).unwrap();
+    assert_eq!(timing_of(&conn, id).unwrap(), TranscribeTiming::After);
+    assert_eq!(get_meeting(&conn, id).unwrap().summary.transcribed_ms, 0);
+    set_status(&conn, id, MeetingStatus::Transcribing).unwrap();
+    assert_eq!(
+        list_by_status(&conn, MeetingStatus::Transcribing).unwrap(),
+        [id]
+    );
 }

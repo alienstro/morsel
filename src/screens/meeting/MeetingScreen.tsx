@@ -106,8 +106,8 @@ export function MeetingScreen() {
 
   const stopAndWrite = () => run(async () => {
     await saveNow();
-    if (LIVE.includes(status)) await api.stopMeeting();
-    await api.writeNotes(id, detail!.summary.templateId);
+    const timing = LIVE.includes(status) ? await api.stopMeeting() : "live";
+    if (timing !== "after") await api.writeNotes(id, detail!.summary.templateId);
     navigate(`/meeting/${id}/writing`);
   });
 

@@ -1,6 +1,7 @@
-//! Cuts one stream into chunks of 10 to 30 seconds, at a silence when it can.
+//! Cuts one stream into chunks of 10 to 28 seconds, at a silence when it can.
+//! Whisper reads less than 30 s for each call, so a chunk stays below that with a margin.
 
-use crate::audio::{level::rms, PIPELINE_RATE};
+use crate::audio::{PIPELINE_RATE, level::rms};
 use crate::types::{AudioChunk, Speaker};
 
 const RATE: usize = PIPELINE_RATE as usize;
@@ -8,7 +9,7 @@ const RATE: usize = PIPELINE_RATE as usize;
 const FRAME: usize = RATE * 30 / 1000;
 const SILENCE_RMS: f32 = 0.01;
 const MIN_SAMPLES: usize = RATE * 10;
-const MAX_SAMPLES: usize = RATE * 30;
+const MAX_SAMPLES: usize = RATE * 28;
 const CUT_SILENCE_SAMPLES: usize = RATE * 400 / 1000;
 
 pub struct Chunker {
@@ -137,12 +138,12 @@ mod tests {
     }
 
     #[test]
-    fn always_cuts_at_30s() {
+    fn always_cuts_at_28s() {
         let mut c = Chunker::new(Speaker::You);
         let chunks = push_all(&mut c, &[speech(35.0)]);
         assert_eq!(chunks.len(), 1);
-        assert!((secs(&chunks[0]) - 30.0).abs() < 0.01);
-        assert!((secs(&c.flush().unwrap()) - 5.0).abs() < 0.01);
+        assert!((secs(&chunks[0]) - 28.0).abs() < 0.03);
+        assert!((secs(&c.flush().unwrap()) - 7.0).abs() < 0.03);
     }
 
     #[test]

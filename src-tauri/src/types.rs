@@ -42,6 +42,8 @@ pub enum MeetingStatus {
     Recording,
     Paused,
     Stopped,
+    /// After mode: Morsel transcribes the saved audio.
+    Transcribing,
     WritingNotes,
     Done,
     NotesCancelled,
@@ -55,6 +57,7 @@ impl MeetingStatus {
             MeetingStatus::Recording => "recording",
             MeetingStatus::Paused => "paused",
             MeetingStatus::Stopped => "stopped",
+            MeetingStatus::Transcribing => "transcribing",
             MeetingStatus::WritingNotes => "writing_notes",
             MeetingStatus::Done => "done",
             MeetingStatus::NotesCancelled => "notes_cancelled",
@@ -79,7 +82,7 @@ pub struct TranscriptLine {
     pub text: String,
 }
 
-/// 16 kHz mono audio of one speaker. It stays in memory only.
+/// 16 kHz mono audio of one speaker, ready for the transcriber.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioChunk {
     pub speaker: Speaker,
@@ -98,7 +101,9 @@ pub enum MorselError {
     #[error("the API key is not valid")]
     InvalidKey,
     /// Composio has several kinds of key, and only a project key works for Morsel.
-    #[error("Composio did not accept this key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys.")]
+    #[error(
+        "Composio did not accept this key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys."
+    )]
     InvalidComposioKey,
     #[error("the provider rate limit is reached")]
     RateLimit,
@@ -179,3 +184,17 @@ impl From<std::io::Error> for MorselError {
 }
 
 pub type Result<T, E = MorselError> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcribing_status_round_trips() {
+        assert_eq!(MeetingStatus::Transcribing.as_str(), "transcribing");
+        assert_eq!(
+            MeetingStatus::parse("transcribing").unwrap(),
+            MeetingStatus::Transcribing
+        );
+    }
+}

@@ -81,6 +81,15 @@ describe("MeetingScreen", () => {
     expect(invoke).toHaveBeenCalledWith("write_notes", { meetingId: 1, templateId: 5 });
   });
 
+  it("after_stop_opens_the_writing_page_without_write_notes", async () => {
+    responses.stop_meeting = "after";
+    await renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Stop and write notes" }));
+    expect(await screen.findByText("writing page")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("stop_meeting");
+    expect(invoke).not.toHaveBeenCalledWith("write_notes", expect.anything());
+  });
+
   it("system_audio_warning_shows_in_the_status_bar", async () => {
     await renderScreen();
     act(() => emit("meeting://status", { meetingId: 1, status: "recording", warning: "Others are not recorded: no permission" }));

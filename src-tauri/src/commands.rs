@@ -1,22 +1,24 @@
 //! The commands that the frontend calls. Each command is a thin call into an `AppState` method.
 
 use crate::ask::{self, AskAnswer, AskRange};
+use crate::audio::recording::audio_dir;
 use crate::audio::{mic::MicSource, source::AudioSource, system_tap::SystemTapSource};
 use crate::db::library::{self, NotesFilter, NotesPage, UsageTotal};
 use crate::db::meetings::{self, MeetingDetail, MeetingSummary};
 use crate::db::templates::{self, Template, TemplateInput};
 use crate::db::{SharedDb, now_ms};
-use crate::events::{EventSink, MODEL_DOWNLOAD};
+use crate::events::{EventSink, MODEL_DOWNLOAD, NOTES_FAILED, STATUS};
 use crate::llm::{self, LlmConfig};
 use crate::notes::writer::{CancellationToken, NotesContext};
 use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
-use crate::session::MeetingSession;
-use crate::settings::{self, Settings, TranscribeMode};
+use crate::session::{MeetingSession, MeetingSetup};
+use crate::settings::{self, Settings, TranscribeMode, TranscribeTiming};
 use crate::transcribe::Transcriber;
+use crate::transcribe::after::{AfterQueue, transcribe_meeting};
 use crate::transcribe::cloud::CloudTranscriber;
-use crate::transcribe::model_download::{ensure_model, model_ready};
-use crate::transcribe::parakeet::ParakeetTranscriber;
-use crate::types::{MeetingId, MorselError, Result};
+use crate::transcribe::model_download::{ensure_model, model_dir, model_ready};
+use crate::transcribe::whisper::WhisperTranscriber;
+use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -33,21 +35,24 @@ pub trait Engines: Send + Sync {
     fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>>;
 }
 
-/// The real microphone, the system tap, and Parakeet or the cloud.
+/// The loaded on-device transcriber, with the language that it was loaded for.
+type LoadedLocal = (String, Arc<dyn Transcriber>);
+
+/// The real microphone, the system tap, and Whisper Turbo or the cloud.
 pub struct RealEngines {
-    model_dir: PathBuf,
+    models_root: PathBuf,
     http: reqwest::Client,
     secrets: Arc<dyn SecretStore>,
-    parakeet: Mutex<Option<Arc<ParakeetTranscriber>>>,
+    local: Mutex<Option<LoadedLocal>>,
 }
 
 impl RealEngines {
-    pub fn new(model_dir: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
+    pub fn new(models_root: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
         Self {
-            model_dir,
+            models_root,
             http,
             secrets,
-            parakeet: Mutex::new(None),
+            local: Mutex::new(None),
         }
     }
 }
@@ -64,16 +69,22 @@ impl Engines for RealEngines {
     fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
         match settings.transcribe_mode {
             TranscribeMode::Local => {
-                let mut cached = self.parakeet.lock().expect("parakeet lock");
-                if cached.is_none() {
-                    if !model_ready(&self.model_dir) {
-                        return Err(MorselError::Invalid(
-                            "download the transcription model in Settings first".into(),
-                        ));
-                    }
-                    *cached = Some(Arc::new(ParakeetTranscriber::new(&self.model_dir)?));
+                let mut cached = self.local.lock().expect("local transcriber lock");
+                if let Some((lang, t)) = cached.as_ref()
+                    && *lang == settings.language
+                {
+                    return Ok(t.clone());
                 }
-                Ok(cached.clone().expect("loaded") as Arc<dyn Transcriber>)
+                let dir = model_dir(&self.models_root);
+                if !model_ready(&dir) {
+                    return Err(MorselError::Invalid(
+                        "download the transcription model in Settings first".into(),
+                    ));
+                }
+                let loaded: Arc<dyn Transcriber> =
+                    Arc::new(WhisperTranscriber::new(&dir, &settings.language)?);
+                *cached = Some((settings.language.clone(), loaded.clone()));
+                Ok(loaded)
             }
             TranscribeMode::Cloud => {
                 let key = self.secrets.get(TRANSCRIBE_KEY)?.ok_or_else(|| {
@@ -110,6 +121,29 @@ fn quick_model_name(settings: &Settings) -> &str {
     }
 }
 
+/// The size of all files in a folder and its subfolders. A missing folder has size 0.
+fn folder_size(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.metadata() {
+            Ok(meta) if meta.is_dir() => folder_size(&entry.path()),
+            Ok(meta) => meta.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+/// Deletes a folder and its files. A missing folder is not an error.
+fn remove_folder(dir: &std::path::Path) -> Result<()> {
+    match std::fs::remove_dir_all(dir) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
 /// A file name that every file system accepts: no path or wildcard characters.
 fn safe_file_name(name: &str) -> String {
     let cleaned: String = name
@@ -135,9 +169,10 @@ pub struct AppState {
     pub sink: Arc<dyn EventSink>,
     engines: Arc<dyn Engines>,
     data_dir: PathBuf,
-    model_dir: PathBuf,
+    models_root: PathBuf,
     session: tokio::sync::Mutex<Option<MeetingSession>>,
     notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
+    after: AfterQueue,
 }
 
 impl AppState {
@@ -148,7 +183,7 @@ impl AppState {
         sink: Arc<dyn EventSink>,
         engines: Arc<dyn Engines>,
         data_dir: PathBuf,
-        model_dir: PathBuf,
+        models_root: PathBuf,
     ) -> Self {
         Self {
             db,
@@ -157,9 +192,10 @@ impl AppState {
             sink,
             engines,
             data_dir,
-            model_dir,
+            models_root,
             session: tokio::sync::Mutex::new(None),
             notes_jobs: Arc::new(Mutex::new(HashMap::new())),
+            after: AfterQueue::default(),
         }
     }
 
@@ -203,11 +239,18 @@ impl AppState {
             self.engines.system(),
             transcriber,
             self.sink.clone(),
-            &title,
-            template_id,
-            Some(settings.language),
+            MeetingSetup {
+                title,
+                template_id,
+                language: Some(settings.language),
+                data_dir: self.data_dir.clone(),
+                timing: settings.transcribe_timing,
+            },
         )?;
         *slot = Some(session);
+        // A recording gets the CPU: the after job stops after its chunk and continues later.
+        self.after.pause_running();
+        meetings::set_timing(&self.conn(), id, settings.transcribe_timing)?;
         if !people.is_empty() {
             let conn = self.db.lock().map_err(|_| MorselError::Db("lock".into()))?;
             meetings::set_people(&conn, id, &people)?;
@@ -238,14 +281,146 @@ impl AppState {
             .resume()
     }
 
-    pub async fn stop_meeting(&self) -> Result<()> {
+    /// Stops the recording. In after mode, it queues the meeting and returns at once; the after
+    /// job writes the notes when the transcript is complete.
+    pub async fn stop_meeting(&self) -> Result<TranscribeTiming> {
         let session = self
             .session
             .lock()
             .await
             .take()
             .ok_or(MorselError::NotRecording)?;
-        session.stop().await
+        let (id, timing) = (session.id(), session.timing());
+        let stopped = session.stop().await;
+        if timing == TranscribeTiming::After {
+            self.set_status(id, MeetingStatus::Transcribing)?;
+            self.after.push(id);
+        }
+        self.after.wake.notify_one();
+        stopped.map(|()| timing)
+    }
+
+    fn set_status(&self, id: MeetingId, status: MeetingStatus) -> Result<()> {
+        meetings::set_status(&self.conn(), id, status)?;
+        self.sink.emit(
+            STATUS,
+            json!({ "meetingId": id, "status": status, "warning": null }),
+        );
+        Ok(())
+    }
+
+    /// The size in bytes of the saved audio of a meeting, or `None` when it has none.
+    pub fn audio_size(&self, meeting_id: MeetingId) -> Option<u64> {
+        let dir = audio_dir(&self.data_dir, meeting_id);
+        dir.exists().then(|| folder_size(&dir))
+    }
+
+    /// Deletes the saved audio of a meeting. The transcript and the notes stay. Morsel refuses
+    /// while the meeting records, or while the after job needs the audio.
+    pub async fn delete_audio(&self, meeting_id: MeetingId) -> Result<()> {
+        if let Some(session) = self.session.lock().await.as_ref()
+            && session.id() == meeting_id
+        {
+            return Err(MorselError::AlreadyRecording);
+        }
+        if self.get_meeting(meeting_id)?.summary.status == MeetingStatus::Transcribing {
+            return Err(MorselError::Invalid(
+                "Morsel transcribes this audio now. Delete it when the notes are ready.".into(),
+            ));
+        }
+        remove_folder(&audio_dir(&self.data_dir, meeting_id))
+    }
+
+    /// The meetings that wait for the after job, oldest first.
+    pub fn queued_after_jobs(&self) -> Vec<MeetingId> {
+        self.after.waiting()
+    }
+
+    /// At app start: queues the meetings that were transcribing, and the after-mode meetings that
+    /// a crash interrupted while they recorded, when their audio exists.
+    pub fn queue_unfinished_after_jobs(&self) -> Result<()> {
+        let (transcribing, interrupted) = {
+            let conn = self.conn();
+            (
+                meetings::list_by_status(&conn, MeetingStatus::Transcribing)?,
+                meetings::list_by_status(&conn, MeetingStatus::Interrupted)?,
+            )
+        };
+        for id in transcribing {
+            self.after.push(id);
+        }
+        for id in interrupted {
+            let after = meetings::timing_of(&self.conn(), id)? == TranscribeTiming::After;
+            if after && audio_dir(&self.data_dir, id).exists() {
+                self.set_status(id, MeetingStatus::Transcribing)?;
+                self.after.push(id);
+            }
+        }
+        Ok(())
+    }
+
+    /// The after-mode worker: one meeting at a time, and only while no meeting records.
+    /// It never returns. Start it one time, when the app starts.
+    pub async fn run_after_jobs(&self) {
+        loop {
+            let token = CancellationToken::new();
+            let id = loop {
+                {
+                    // Hold the session lock while the job is marked as running: a meeting that
+                    // starts right after this then finds the job and pauses it.
+                    let session = self.session.lock().await;
+                    if session.is_none()
+                        && let Some(id) = self.after.pop()
+                    {
+                        self.after.set_running(id, token.clone());
+                        break id;
+                    }
+                }
+                self.after.wake.notified().await;
+            };
+            let result = self.transcribe_after(id, &token).await;
+            self.after.clear_running();
+            if token.is_cancelled() {
+                // A new recording paused the job, or the meeting was deleted.
+                if self.get_meeting(id).is_ok() {
+                    self.after.push_front(id);
+                }
+                continue;
+            }
+            let notes = result.and_then(|()| {
+                let template_id = self.get_meeting(id)?.summary.template_id;
+                self.write_notes(id, template_id)
+            });
+            if let Err(err) = notes {
+                self.fail_after_job(id, &err);
+            }
+        }
+    }
+
+    async fn transcribe_after(&self, id: MeetingId, token: &CancellationToken) -> Result<()> {
+        let settings = self.settings()?;
+        let transcriber = self.engines.transcriber(&settings)?;
+        transcribe_meeting(
+            &self.db,
+            transcriber.as_ref(),
+            &self.sink,
+            &audio_dir(&self.data_dir, id),
+            id,
+            Some(&settings.language),
+            token,
+        )
+        .await
+    }
+
+    fn fail_after_job(&self, id: MeetingId, err: &MorselError) {
+        eprintln!("the after job of meeting {id} failed: {err}");
+        if let Err(status_err) = self.set_status(id, MeetingStatus::NotesFailed) {
+            eprintln!("cannot set the meeting status: {status_err}");
+        }
+        self.sink.emit(
+            NOTES_FAILED,
+            json!({ "meetingId": id, "message": err.to_string() }),
+        );
     }
 
     pub fn save_user_notes(&self, meeting_id: MeetingId, body: &str) -> Result<()> {
@@ -380,7 +555,9 @@ impl AppState {
             return Err(MorselError::AlreadyRecording);
         }
         self.cancel_notes(meeting_id);
-        library::delete_meeting(&self.conn(), meeting_id)
+        self.after.remove(meeting_id);
+        library::delete_meeting(&self.conn(), meeting_id)?;
+        remove_folder(&audio_dir(&self.data_dir, meeting_id))
     }
 
     /// Creates a template when `id` is `None`, else changes it. Returns the id.
@@ -435,7 +612,7 @@ impl AppState {
 
     pub fn data_info(&self) -> Result<DataInfo> {
         let notes = library::count_meetings(&self.conn())?;
-        let mut bytes = 0;
+        let mut bytes = folder_size(&self.data_dir.join("audio"));
         if let Ok(entries) = std::fs::read_dir(&self.data_dir) {
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata()
@@ -489,6 +666,11 @@ impl AppState {
         for token in self.notes_jobs.lock().expect("jobs lock").values() {
             token.cancel();
         }
+        for id in self.after.waiting() {
+            self.after.remove(id);
+        }
+        self.after.pause_running();
+        remove_folder(&self.data_dir.join("audio"))?;
         {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
@@ -513,17 +695,21 @@ impl AppState {
     }
 
     pub fn model_ready(&self) -> bool {
-        model_ready(&self.model_dir)
+        model_ready(&model_dir(&self.models_root))
     }
 
     pub async fn download_model(&self) -> Result<()> {
         let sink = self.sink.clone();
-        ensure_model(&self.http, &self.model_dir, move |received, total| {
-            sink.emit(
-                MODEL_DOWNLOAD,
-                json!({ "received": received, "total": total }),
-            );
-        })
+        ensure_model(
+            &self.http,
+            &model_dir(&self.models_root),
+            move |received, total| {
+                sink.emit(
+                    MODEL_DOWNLOAD,
+                    json!({ "received": received, "total": total }),
+                );
+            },
+        )
         .await
         .map(|_| ())
     }
@@ -552,7 +738,7 @@ pub async fn resume_meeting(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
-pub async fn stop_meeting(state: State<'_, AppState>) -> Result<()> {
+pub async fn stop_meeting(state: State<'_, AppState>) -> Result<TranscribeTiming> {
     state.stop_meeting().await
 }
 
@@ -642,6 +828,16 @@ pub async fn download_model(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn audio_size(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<Option<u64>> {
+    Ok(state.audio_size(meeting_id))
+}
+
+#[tauri::command]
+pub async fn delete_audio(state: State<'_, AppState>, meeting_id: MeetingId) -> Result<()> {
+    state.delete_audio(meeting_id).await
+}
+
+#[tauri::command]
 pub async fn search_notes(state: State<'_, AppState>, filter: NotesFilter) -> Result<NotesPage> {
     state.search_notes(&filter)
 }
@@ -726,6 +922,7 @@ mod tests {
     use crate::audio::source::AudioSource;
     use crate::events::VecSink;
     use crate::secrets::MemoryStore;
+    use crate::settings::TranscribeTiming;
     use crate::transcribe::Transcriber;
     use tokio::sync::mpsc::Sender;
 
@@ -771,6 +968,233 @@ mod tests {
             dir.path().join("models"),
         );
         (dir, state)
+    }
+
+    fn state_with_sink() -> (tempfile::TempDir, Arc<AppState>, Arc<VecSink>) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(&dir.path().join("m.db")).unwrap();
+        let sink = Arc::new(VecSink::default());
+        let state = AppState::new(
+            Arc::new(std::sync::Mutex::new(db)),
+            Arc::new(MemoryStore::default()),
+            reqwest::Client::new(),
+            sink.clone(),
+            Arc::new(FakeEngines),
+            dir.path().to_path_buf(),
+            dir.path().join("models"),
+        );
+        (dir, Arc::new(state), sink)
+    }
+
+    fn use_after_mode(s: &AppState) {
+        let mut settings = s.settings().unwrap();
+        settings.transcribe_timing = TranscribeTiming::After;
+        s.save_settings(&settings).unwrap();
+    }
+
+    fn spawn_worker(s: &Arc<AppState>) {
+        let worker = s.clone();
+        tokio::spawn(async move { worker.run_after_jobs().await });
+    }
+
+    async fn wait_for_status(s: &AppState, id: MeetingId, status: MeetingStatus) {
+        for _ in 0..200 {
+            if s.get_meeting(id).unwrap().summary.status == status {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!(
+            "meeting {id} is {:?}, not {status:?}",
+            s.get_meeting(id).unwrap().summary.status
+        );
+    }
+
+    fn failure_of(sink: &VecSink, id: MeetingId) -> String {
+        sink.named(crate::events::NOTES_FAILED)
+            .iter()
+            .find(|e| e["meetingId"] == id)
+            .map(|e| e["message"].as_str().unwrap_or_default().to_owned())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn after_stop_returns_at_once_and_writes_notes_later() {
+        let (_d, s, sink) = state_with_sink();
+        use_after_mode(&s);
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert_eq!(s.stop_meeting().await.unwrap(), TranscribeTiming::After);
+        assert_eq!(
+            s.get_meeting(id).unwrap().summary.status,
+            MeetingStatus::Transcribing
+        );
+        spawn_worker(&s);
+        // No notes key is set, so the notes step fails: the job got to it.
+        wait_for_status(&s, id, MeetingStatus::NotesFailed).await;
+        assert!(
+            failure_of(&sink, id).contains("notes API key"),
+            "{}",
+            failure_of(&sink, id)
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_twice_queues_the_meeting_once() {
+        let (_d, s, _sink) = state_with_sink();
+        use_after_mode(&s);
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(matches!(
+            s.stop_meeting().await,
+            Err(MorselError::NotRecording)
+        ));
+        assert_eq!(s.queued_after_jobs(), [id]);
+    }
+
+    #[tokio::test]
+    async fn after_job_waits_while_a_meeting_records() {
+        let (_d, s, _sink) = state_with_sink();
+        use_after_mode(&s);
+        let first = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        let second = s.start_meeting(None, 1).await.unwrap();
+        spawn_worker(&s);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(
+            s.get_meeting(first).unwrap().summary.status,
+            MeetingStatus::Transcribing
+        );
+        s.stop_meeting().await.unwrap();
+        wait_for_status(&s, first, MeetingStatus::NotesFailed).await;
+        wait_for_status(&s, second, MeetingStatus::NotesFailed).await;
+    }
+
+    #[tokio::test]
+    async fn missing_audio_fails_only_that_meeting() {
+        let (d, s, sink) = state_with_sink();
+        use_after_mode(&s);
+        let first = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        let second = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        std::fs::remove_dir_all(crate::audio::recording::audio_dir(d.path(), first)).unwrap();
+        spawn_worker(&s);
+        wait_for_status(&s, first, MeetingStatus::NotesFailed).await;
+        wait_for_status(&s, second, MeetingStatus::NotesFailed).await;
+        assert!(
+            failure_of(&sink, first).contains("no saved audio"),
+            "{}",
+            failure_of(&sink, first)
+        );
+        assert!(
+            failure_of(&sink, second).contains("notes API key"),
+            "{}",
+            failure_of(&sink, second)
+        );
+    }
+
+    #[tokio::test]
+    async fn start_queues_transcribing_and_interrupted_after_meetings() {
+        let (d, s, _sink) = state_with_sink();
+        let conn_meeting = |timing: TranscribeTiming, status: MeetingStatus, audio: bool| {
+            let conn = s.db.lock().unwrap();
+            let id = meetings::create_meeting(&conn, "M", 1).unwrap();
+            meetings::set_timing(&conn, id, timing).unwrap();
+            meetings::set_status(&conn, id, status).unwrap();
+            if audio {
+                std::fs::create_dir_all(crate::audio::recording::audio_dir(d.path(), id)).unwrap();
+            }
+            id
+        };
+        let transcribing = conn_meeting(TranscribeTiming::After, MeetingStatus::Transcribing, true);
+        let crashed = conn_meeting(TranscribeTiming::After, MeetingStatus::Interrupted, true);
+        conn_meeting(TranscribeTiming::Live, MeetingStatus::Interrupted, true);
+        conn_meeting(TranscribeTiming::After, MeetingStatus::Interrupted, false);
+        s.queue_unfinished_after_jobs().unwrap();
+        assert_eq!(s.queued_after_jobs(), [transcribing, crashed]);
+        assert_eq!(
+            s.get_meeting(crashed).unwrap().summary.status,
+            MeetingStatus::Transcribing
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_meeting_cancels_its_job() {
+        let (_d, s, _sink) = state_with_sink();
+        use_after_mode(&s);
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        s.delete_meeting(id).await.unwrap();
+        assert!(s.queued_after_jobs().is_empty());
+    }
+
+    fn saved_audio(d: &tempfile::TempDir, id: MeetingId) -> std::path::PathBuf {
+        crate::audio::recording::audio_dir(d.path(), id)
+    }
+
+    #[tokio::test]
+    async fn delete_audio_keeps_the_transcript() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        meetings::add_line(
+            &s.conn(),
+            &crate::types::TranscriptLine {
+                meeting_id: id,
+                speaker: crate::types::Speaker::You,
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "hello".into(),
+            },
+        )
+        .unwrap();
+        assert!(s.audio_size(id).is_some());
+        s.delete_audio(id).await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+        assert_eq!(s.audio_size(id), None);
+        assert_eq!(s.get_meeting(id).unwrap().lines.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_audio_refuses_while_recording_or_transcribing() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        assert!(s.delete_audio(id).await.is_err());
+        use_after_mode(&s);
+        s.stop_meeting().await.unwrap();
+        let after = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(s.delete_audio(after).await.is_err());
+        assert!(saved_audio(&d, after).exists());
+    }
+
+    #[tokio::test]
+    async fn delete_meeting_deletes_its_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        assert!(saved_audio(&d, id).exists());
+        s.delete_meeting(id).await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+    }
+
+    #[tokio::test]
+    async fn delete_all_data_deletes_the_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let id = s.start_meeting(None, 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        s.delete_all_data().await.unwrap();
+        assert!(!saved_audio(&d, id).exists());
+    }
+
+    #[test]
+    fn data_info_counts_the_audio() {
+        let (d, s, _sink) = state_with_sink();
+        let before = s.data_info().unwrap().bytes;
+        let dir = saved_audio(&d, 7);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("you.wav"), vec![0u8; 5_000]).unwrap();
+        assert_eq!(s.data_info().unwrap().bytes, before + 5_000);
     }
 
     #[test]

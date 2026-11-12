@@ -2,6 +2,7 @@
 
 use super::library::reindex_meeting;
 use super::now_ms;
+use crate::settings::TranscribeTiming;
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result, Speaker, TranscriptLine};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,8 @@ pub struct MeetingSummary {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub people: Vec<String>,
+    /// After mode: the audio time that the job has transcribed.
+    pub transcribed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,7 +34,7 @@ pub struct MeetingDetail {
 /// The title of a meeting that the user did not name.
 pub const UNTITLED: &str = "Untitled meeting";
 
-pub(crate) const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at, m.ended_at, m.people \
+pub(crate) const SUMMARY_SQL: &str = "SELECT m.id, m.title, m.template_id, t.name, m.status, m.started_at, m.ended_at, m.people, m.transcribed_ms \
      FROM meetings m JOIN templates t ON t.id = m.template_id";
 
 /// The raw columns of `SUMMARY_SQL`, before the status and the people are parsed.
@@ -44,6 +47,7 @@ pub(crate) struct SummaryRow {
     started_at: i64,
     ended_at: Option<i64>,
     people: String,
+    transcribed_ms: i64,
 }
 
 pub(crate) fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<SummaryRow> {
@@ -56,6 +60,7 @@ pub(crate) fn summary_from_row(row: &Row<'_>) -> rusqlite::Result<SummaryRow> {
         started_at: row.get(5)?,
         ended_at: row.get(6)?,
         people: row.get(7)?,
+        transcribed_ms: row.get(8)?,
     })
 }
 
@@ -71,6 +76,7 @@ pub(crate) fn to_summary(raw: SummaryRow) -> Result<MeetingSummary> {
         started_at: raw.started_at,
         ended_at: raw.ended_at,
         people,
+        transcribed_ms: raw.transcribed_ms.max(0) as u64,
     })
 }
 
@@ -129,6 +135,58 @@ pub fn add_line(conn: &Connection, line: &TranscriptLine) -> Result<()> {
         params![line.meeting_id, line.speaker.as_str(), line.start_ms as i64, line.end_ms as i64, line.text],
     )?;
     Ok(())
+}
+
+/// After mode: saves one line and the progress of the job in one transaction.
+pub fn add_line_at(conn: &Connection, line: &TranscriptLine, transcribed_ms: u64) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    add_line(&tx, line)?;
+    set_transcribed_ms(&tx, line.meeting_id, transcribed_ms)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn set_transcribed_ms(conn: &Connection, id: MeetingId, ms: u64) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings SET transcribed_ms = ?1 WHERE id = ?2",
+        params![ms as i64, id],
+    )?;
+    Ok(())
+}
+
+/// The end of the last line of one speaker, or 0. The after job continues from here.
+pub fn last_line_end(conn: &Connection, id: MeetingId, speaker: Speaker) -> Result<u64> {
+    let end: Option<i64> = conn.query_row(
+        "SELECT MAX(end_ms) FROM transcript_lines WHERE meeting_id = ?1 AND speaker = ?2",
+        params![id, speaker.as_str()],
+        |r| r.get(0),
+    )?;
+    Ok(end.unwrap_or(0).max(0) as u64)
+}
+
+pub fn set_timing(conn: &Connection, id: MeetingId, timing: TranscribeTiming) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings SET transcribe_timing = ?1 WHERE id = ?2",
+        params![timing.as_str(), id],
+    )?;
+    Ok(())
+}
+
+pub fn timing_of(conn: &Connection, id: MeetingId) -> Result<TranscribeTiming> {
+    let value: String = conn.query_row(
+        "SELECT transcribe_timing FROM meetings WHERE id = ?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    Ok(TranscribeTiming::parse(&value))
+}
+
+/// The meetings with one status, oldest first.
+pub fn list_by_status(conn: &Connection, status: MeetingStatus) -> Result<Vec<MeetingId>> {
+    Ok(conn
+        .prepare("SELECT id FROM meetings WHERE status = ?1 ORDER BY started_at, id")?
+        .query_map([status.as_str()], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 pub fn save_user_notes(conn: &Connection, id: MeetingId, body: &str) -> Result<()> {
