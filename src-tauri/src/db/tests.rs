@@ -139,3 +139,99 @@ fn migration_3_adds_the_timing_columns() {
         [id]
     );
 }
+
+mod parts {
+    use super::temp_db;
+    use crate::db::library::delete_meeting;
+    use crate::db::meetings::{create_meeting, set_status};
+    use crate::db::parts::*;
+    use crate::types::MeetingStatus;
+
+    fn part(text: &str) -> NewPart {
+        NewPart {
+            start_ms: Some(0),
+            end_ms: Some(1000),
+            text: text.into(),
+        }
+    }
+
+    fn part_texts(conn: &rusqlite::Connection, meeting: i64) -> Vec<String> {
+        conn.prepare("SELECT text FROM chunks WHERE meeting_id = ?1 ORDER BY part")
+            .unwrap()
+            .query_map([meeting], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn replace_parts_keeps_only_the_new_parts() {
+        let (_d, conn) = temp_db();
+        let id = create_meeting(&conn, "Sync", 1).unwrap();
+        replace_parts(&conn, id, &[part("old one"), part("old two")]).unwrap();
+        replace_parts(&conn, id, &[part("new one")]).unwrap();
+        assert_eq!(part_texts(&conn, id), vec!["new one".to_string()]);
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 0);
+    }
+
+    #[test]
+    fn set_embedding_round_trips_768_floats() {
+        let (_d, conn) = temp_db();
+        let id = create_meeting(&conn, "Sync", 1).unwrap();
+        replace_parts(&conn, id, &[part("budget")]).unwrap();
+        let (part_id, meeting, text) = parts_without_embedding(&conn, 10).unwrap().remove(0);
+        assert_eq!((meeting, text.as_str()), (id, "budget"));
+        let vector: Vec<f32> = (0..768).map(|i| i as f32 / 768.0).collect();
+        set_embedding(&conn, part_id, &vector).unwrap();
+        let blob: Vec<u8> = conn
+            .query_row(
+                "SELECT embedding FROM chunks WHERE id = ?1",
+                [part_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let back: Vec<f32> = blob
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        assert_eq!(back, vector);
+        assert!(parts_without_embedding(&conn, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_meeting_deletes_its_parts_and_their_search_rows() {
+        let (_d, conn) = temp_db();
+        let id = create_meeting(&conn, "Sync", 1).unwrap();
+        replace_parts(&conn, id, &[part("budget talk")]).unwrap();
+        delete_meeting(&conn, id).unwrap();
+        assert!(part_texts(&conn, id).is_empty());
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'budget'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 0);
+    }
+
+    #[test]
+    fn meetings_without_parts_lists_only_done_meetings() {
+        let (_d, conn) = temp_db();
+        let done = create_meeting(&conn, "Done", 1).unwrap();
+        set_status(&conn, done, MeetingStatus::Done).unwrap();
+        let recording = create_meeting(&conn, "Live", 1).unwrap();
+        set_status(&conn, recording, MeetingStatus::Recording).unwrap();
+        let indexed = create_meeting(&conn, "Indexed", 1).unwrap();
+        set_status(&conn, indexed, MeetingStatus::Done).unwrap();
+        replace_parts(&conn, indexed, &[part("x")]).unwrap();
+        assert_eq!(meetings_without_parts(&conn).unwrap(), vec![done]);
+    }
+}
