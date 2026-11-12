@@ -12,6 +12,8 @@ pub const MODEL_DOWNLOAD: &str = "model://download";
 pub const NOTES_MODEL_DOWNLOAD: &str = "notes-model://download";
 /// After mode: `{ meetingId, doneMs, totalMs }` after each chunk.
 pub const TRANSCRIBE_PROGRESS: &str = "transcribe://progress";
+/// The search index: `{ done, total }` after each meeting or each batch of parts.
+pub const SEARCH_PROGRESS: &str = "search://progress";
 
 pub trait EventSink: Send + Sync {
     fn emit(&self, name: &str, payload: Value);

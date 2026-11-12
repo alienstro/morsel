@@ -2,4 +2,5 @@
 
 pub mod embed;
 pub mod hybrid;
+pub mod index;
 pub mod parts;

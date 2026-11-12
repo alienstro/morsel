@@ -11,10 +11,11 @@ pub struct NewPart {
     pub text: String,
 }
 
-/// Deletes the old parts of the meeting, then stores `parts` in order.
-pub fn replace_parts(conn: &Connection, meeting: MeetingId, parts: &[NewPart]) -> Result<()> {
+/// Deletes the old parts of the meeting, then stores `parts` in order. Returns their ids.
+pub fn replace_parts(conn: &Connection, meeting: MeetingId, parts: &[NewPart]) -> Result<Vec<i64>> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM chunks WHERE meeting_id = ?1", [meeting])?;
+    let mut ids = Vec::with_capacity(parts.len());
     {
         let mut insert = tx.prepare(
             "INSERT INTO chunks (meeting_id, part, start_ms, end_ms, text) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -23,10 +24,11 @@ pub fn replace_parts(conn: &Connection, meeting: MeetingId, parts: &[NewPart]) -
             let start = p.start_ms.map(|v| v as i64);
             let end = p.end_ms.map(|v| v as i64);
             insert.execute(params![meeting, i as i64, start, end, p.text])?;
+            ids.push(tx.last_insert_rowid());
         }
     }
     tx.commit()?;
-    Ok(())
+    Ok(ids)
 }
 
 /// Parts that have no embedding yet, oldest first: (part id, meeting, text).

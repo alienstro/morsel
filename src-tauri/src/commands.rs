@@ -625,6 +625,7 @@ impl AppState {
             sink: self.sink.clone(),
             notes,
             quick,
+            embed: None,
         };
         let cancel = CancellationToken::new();
         let jobs = self.notes_jobs.clone();
