@@ -18,7 +18,7 @@ pub mod types;
 use calendar::service::CalendarService;
 use commands::{AppState, RealEngines};
 use events::EventSink;
-use secrets::{KeychainStore, SecretStore};
+use secrets::SecretStore;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Builder, Emitter, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -107,7 +107,12 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         eprintln!("marked {interrupted} meeting(s) as interrupted");
     }
     let http = reqwest::Client::new();
-    let secrets: Arc<dyn SecretStore> = Arc::new(KeychainStore);
+    // A debug build gets a new code signature on each rebuild, so the Keychain asks again each time.
+    #[cfg(debug_assertions)]
+    let secrets: Arc<dyn SecretStore> =
+        Arc::new(secrets::FileStore::new(&data_dir.join("secrets.json")));
+    #[cfg(not(debug_assertions))]
+    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::KeychainStore);
     // Whisper Turbo has its own folder in here. Older versions also put Parakeet here.
     let models_root = transcribe::model_download::models_root(&data_dir);
     transcribe::model_download::remove_old_models(&models_root);
