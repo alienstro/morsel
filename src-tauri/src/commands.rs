@@ -716,7 +716,7 @@ impl AppState {
         meeting_id: Option<MeetingId>,
     ) -> Result<AskAnswer> {
         let (_, quick) = self.chat_models(Purpose::Ask)?;
-        ask::ask(&self.db, quick.as_ref(), question, range, meeting_id).await
+        ask::ask(&self.db, quick.as_ref(), None, question, range, meeting_id).await
     }
 
     pub fn list_asks(&self, limit: u32) -> Result<Vec<AskAnswer>> {
