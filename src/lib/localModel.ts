@@ -20,6 +20,9 @@ export const SEARCH_MODEL: ModelInfo = {
   about: "Finds the parts of your meetings that answer a question in Ask, on this Mac.",
 };
 
+/** The notes model and the search model together. */
+export const LOCAL_DOWNLOAD_TOTAL = "3.27 GB";
+
 export type Progress = { received: number; total: number };
 
 type ModelSource = {
@@ -47,15 +50,18 @@ function useModelDownload(source: ModelSource) {
     };
   }, [source]);
 
-  const download = async () => {
+  /** Downloads the model. Resolves to true when the model is ready. */
+  const download = async (): Promise<boolean> => {
     setError(null);
     setDownloading(true);
     setProgress({ received: 0, total: 0 });
     try {
       await source.download();
       setReady(true);
+      return true;
     } catch (e) {
       setError(errorMessage(e));
+      return false;
     } finally {
       setDownloading(false);
       setProgress(null);
