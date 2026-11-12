@@ -197,13 +197,7 @@ mod parts {
                 |r| r.get(0),
             )
             .unwrap();
-        let back: Vec<f32> = blob
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| f32::from_le_bytes(*b))
-            .collect();
-        assert_eq!(back, vector);
+        assert_eq!(decode_embedding(&blob), vector);
         assert!(parts_without_embedding(&conn, 10).unwrap().is_empty());
     }
 

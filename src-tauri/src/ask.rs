@@ -53,7 +53,7 @@ const SYSTEM: &str = "You answer questions about the user's meetings.\n\
 
 impl AskRange {
     /// The earliest start time that the range includes.
-    fn since(self, now_ms: i64) -> i64 {
+    pub fn since(self, now_ms: i64) -> i64 {
         match self {
             AskRange::All => i64::MIN,
             AskRange::Week => now_ms - 7 * DAY_MS,

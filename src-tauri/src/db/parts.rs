@@ -53,6 +53,15 @@ pub fn set_embedding(conn: &Connection, part: i64, vector: &[f32]) -> Result<()>
     Ok(())
 }
 
+/// Reads an embedding that `set_embedding` saved.
+pub fn decode_embedding(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
+        .collect()
+}
+
 /// Finished meetings that have no parts yet, oldest first.
 pub fn meetings_without_parts(conn: &Connection) -> Result<Vec<MeetingId>> {
     let mut stmt = conn.prepare(
