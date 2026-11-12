@@ -71,6 +71,8 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::download_model,
             commands::notes_model_status,
             commands::download_notes_model,
+            commands::search_model_status,
+            commands::download_search_model,
             commands::audio_size,
             commands::delete_audio,
             commands::search_notes,
@@ -151,8 +153,13 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         commands::LocalModels {
             root: models_root,
             notes_model,
+            search_model: Arc::new(model_manager::ModelManager::new(
+                Box::new(|path| search::embed::LocalEmbedder::load(path).map(Arc::new)),
+                model_manager::EMBED_IDLE,
+            )),
         },
     ));
+    app.state::<AppState>().start_indexing();
     start_after_jobs(app.handle().clone())?;
     start_calendar_poll(calendar.clone());
     app.manage(calendar::reminder::ReminderState::default());

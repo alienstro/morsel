@@ -1,6 +1,8 @@
 //! The on-device search model: EmbeddingGemma 2 (Q8_0) through llama.cpp, with Metal.
 
 use crate::local_llm::backend;
+use crate::model_manager::ModelManager;
+use crate::search::index::Embed;
 use crate::transcribe::model_download::ModelFile;
 use crate::types::{MorselError, Result};
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -9,6 +11,7 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const SEARCH_REPO: &str = "https://huggingface.co/unsloth/embeddinggemma-2-GGUF/resolve/main";
 const SEARCH_DIR: &str = "embeddinggemma-2-q8";
@@ -114,6 +117,25 @@ impl LocalEmbedder {
             out.push(normalize(vector));
         }
         Ok(out)
+    }
+}
+
+/// The search model behind the model manager, which loads it on first use and frees
+/// it after `EMBED_IDLE`.
+pub struct ManagedEmbed {
+    manager: Arc<ModelManager<LocalEmbedder>>,
+    path: PathBuf,
+}
+
+impl ManagedEmbed {
+    pub fn new(manager: Arc<ModelManager<LocalEmbedder>>, path: PathBuf) -> Self {
+        Self { manager, path }
+    }
+}
+
+impl Embed for ManagedEmbed {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.manager.run(&self.path, |model| model.embed(texts))
     }
 }
 
