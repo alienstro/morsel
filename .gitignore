@@ -26,3 +26,8 @@ dist-ssr
 # Morsel
 .superpowers/
 .vitest/
+
+# Local secrets
+.env
+.env.*
+!.env.example
