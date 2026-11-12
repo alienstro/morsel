@@ -13,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 /// The manager frees the model after this time with no use.
 pub const IDLE: Duration = Duration::from_secs(300);
+/// The manager frees the search model after this time with no use.
+pub const EMBED_IDLE: Duration = Duration::from_secs(60);
 /// The answer limits. With the local budget of 6,000 prompt tokens, they fit the 8,192-token context.
 const NOTES_MAX_TOKENS: u32 = 1536;
 const ASK_MAX_TOKENS: u32 = 768;
