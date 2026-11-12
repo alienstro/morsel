@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 
 const ROW_KEY: &str = "app";
 
+/// Where the notes model runs: on this Mac, or at the cloud provider in `notes_base_url`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotesMode {
+    Local,
+    Cloud,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscribeMode {
@@ -46,6 +54,8 @@ impl TranscribeTiming {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// `None` until the user chooses. Then an install with a notes key keeps Cloud, and a new one uses Local.
+    pub notes_mode: Option<NotesMode>,
     pub notes_base_url: String,
     pub notes_model: String,
     pub quick_model: String,
@@ -68,6 +78,7 @@ pub const DEFAULT_SHORTCUT: &str = "CommandOrControl+Shift+M";
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            notes_mode: None,
             notes_base_url: "https://openrouter.ai/api/v1".into(),
             notes_model: String::new(),
             quick_model: String::new(),

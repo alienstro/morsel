@@ -29,7 +29,7 @@ Morsel never joins the call. The other people see nothing in the call.
 | Frontend | React, TypeScript, Vite |
 | Notes editor | Tiptap |
 | Database | SQLite through `rusqlite` (feature `bundled`), one file in the app data folder |
-| Secrets | macOS Keychain through the `keyring` crate |
+| Secrets | Release builds: macOS Keychain through the `keyring` crate. Debug builds: `secrets.json` (mode 0600) in the app data folder |
 | Frontend tests | Vitest and Testing Library |
 | Backend tests | `cargo test` |
 | Package manager | pnpm |
@@ -127,7 +127,7 @@ v1 has five built-in templates: General, 1:1, Sales call, Stand-up, Product sync
 
 ## 13. Privacy and security
 
-- API keys stay in the Keychain (service `app.morsel`). They never go to the frontend, to a log, or to the database.
+- API keys stay in the Keychain (service `app.morsel`) in release builds, and in `secrets.json` (mode 0600) in debug builds. They never go to the frontend, to a log, or to the database.
 - Tauri capabilities give the main window only the Morsel commands and the events it needs.
 - No audio on disk (section 5).
 - "Export all data" writes every note as Markdown to a folder that the user selects. "Delete all data" deletes the database and the keys, after the warning "You cannot undo this."

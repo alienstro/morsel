@@ -1,11 +1,14 @@
 pub mod ask;
 pub mod audio;
 pub mod calendar;
+pub mod chat_model;
 pub mod chunker;
 pub mod commands;
 pub mod db;
 pub mod events;
 pub mod llm;
+pub mod local_llm;
+pub mod model_manager;
 pub mod notes;
 pub mod permissions;
 pub mod secrets;
@@ -18,7 +21,7 @@ pub mod types;
 use calendar::service::CalendarService;
 use commands::{AppState, RealEngines};
 use events::EventSink;
-use secrets::{KeychainStore, SecretStore};
+use secrets::SecretStore;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Builder, Emitter, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -65,6 +68,8 @@ pub fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::test_notes_key,
             commands::model_status,
             commands::download_model,
+            commands::notes_model_status,
+            commands::download_notes_model,
             commands::audio_size,
             commands::delete_audio,
             commands::search_notes,
@@ -107,14 +112,24 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         eprintln!("marked {interrupted} meeting(s) as interrupted");
     }
     let http = reqwest::Client::new();
-    let secrets: Arc<dyn SecretStore> = Arc::new(KeychainStore);
+    // A debug build gets a new code signature on each rebuild, so the Keychain asks again each time.
+    #[cfg(debug_assertions)]
+    let secrets: Arc<dyn SecretStore> =
+        Arc::new(secrets::FileStore::new(&data_dir.join("secrets.json")));
+    #[cfg(not(debug_assertions))]
+    let secrets: Arc<dyn SecretStore> = Arc::new(secrets::KeychainStore);
     // Whisper Turbo has its own folder in here. Older versions also put Parakeet here.
     let models_root = transcribe::model_download::models_root(&data_dir);
     transcribe::model_download::remove_old_models(&models_root);
+    let notes_model = Arc::new(model_manager::ModelManager::new(
+        Box::new(|path| local_llm::LocalLlm::load(path).map(Arc::new)),
+        model_manager::IDLE,
+    ));
     let engines = Arc::new(RealEngines::new(
         models_root.clone(),
         http.clone(),
         secrets.clone(),
+        notes_model.clone(),
     ));
     let sink = Arc::new(TauriSink(app.handle().clone()));
     let calendar = Arc::new(CalendarService::new(
@@ -132,7 +147,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         sink,
         engines,
         data_dir,
-        models_root,
+        commands::LocalModels {
+            root: models_root,
+            notes_model,
+        },
     ));
     start_after_jobs(app.handle().clone())?;
     start_calendar_poll(calendar.clone());

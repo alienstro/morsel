@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
+  notesMode: "local", notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
   onboarded: false, remindBeforeMeeting: true, globalShortcut: "CommandOrControl+Shift+M",
 };
@@ -90,19 +90,21 @@ describe("AI step", () => {
     responses.test_notes_key = null;
     renderAt("/welcome/2");
     expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /^Cloud.*your own key/ }));
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.change(screen.getByLabelText("Model"), { target: { value: "provider/model" } });
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     expect(await screen.findByText("Connected")).toBeInTheDocument();
     const order = invoke.mock.calls.map(([c]) => c).filter((c) => ["save_settings", "set_api_key", "test_notes_key"].includes(c));
     expect(order).toEqual(["save_settings", "set_api_key", "test_notes_key"]);
-    expect(calls("save_settings")[0].settings).toMatchObject({ notesModel: "provider/model" });
+    expect(calls("save_settings")[0].settings).toMatchObject({ notesMode: "cloud", notesModel: "provider/model" });
     expect(calls("set_api_key")[0]).toEqual({ account: "notes_api_key", key: "sk-test" });
   });
 
   it("custom_provider_shows_the_base_url", async () => {
     renderAt("/welcome/2");
     await screen.findByText("Step 2 of 3");
+    fireEvent.click(screen.getByRole("radio", { name: /^Cloud.*your own key/ }));
     expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "custom" } });
     expect(screen.getByLabelText("Base URL")).toHaveValue("");
@@ -123,6 +125,17 @@ describe("AI step", () => {
     await waitFor(() => expect(calls("download_model")).toHaveLength(1));
     act(() => emit("model://download", { received: 384 * 1_000_000, total: 600 * 1_000_000 }));
     expect(await screen.findByText("Downloading, 384 of 600 MB")).toBeInTheDocument();
+  });
+
+  it("ai_step_offers_the_local_notes_model", async () => {
+    responses.download_notes_model = () => new Promise(() => {});
+    renderAt("/welcome/2");
+    expect(await screen.findByRole("radio", { name: /^On this Mac: MiniCPM-V-4.*2\.96 GB/ })).toBeChecked();
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download the notes model" }));
+    await waitFor(() => expect(calls("download_notes_model")).toHaveLength(1));
+    act(() => emit("notes-model://download", { received: 740 * 1_000_000, total: 2960 * 1_000_000 }));
+    expect(await screen.findByText("Downloading, 740 of 2960 MB")).toBeInTheDocument();
   });
 
   it("ai_step_back_goes_to_step_1", async () => {

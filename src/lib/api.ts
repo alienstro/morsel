@@ -26,7 +26,7 @@ export type AskAnswer = { id: number | null; question: string; answer: string; s
 export type UsageTotal = { promptTokens: number; completionTokens: number; cost: number | null };
 export type DataInfo = { path: string; notes: number; bytes: number };
 export type Settings = {
-  notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud"; transcribeTiming: "live" | "after";
+  notesMode: "local" | "cloud" | null; notesBaseUrl: string; notesModel: string; quickModel: string; transcribeMode: "local" | "cloud"; transcribeTiming: "live" | "after";
   transcribeBaseUrl: string; transcribeModel: string; language: string;
   onboarded: boolean; remindBeforeMeeting: boolean; globalShortcut: string;
 };
@@ -66,6 +66,8 @@ export const api = {
   testNotesKey: () => invoke<void>("test_notes_key"),
   modelStatus: () => invoke<boolean>("model_status"),
   downloadModel: () => invoke<void>("download_model"),
+  notesModelStatus: () => invoke<boolean>("notes_model_status"),
+  downloadNotesModel: () => invoke<void>("download_notes_model"),
   /** The size in bytes of the saved audio of a meeting, or null when it has none. */
   audioSize: (meetingId: number) => invoke<number | null>("audio_size", { meetingId }),
   deleteAudio: (meetingId: number) => invoke<void>("delete_audio", { meetingId }),
@@ -114,6 +116,7 @@ export const onCalendarChanged = (h: () => void) => on("calendar://changed", h);
 export const onTranscribeProgress = (h: (e: { meetingId: number; doneMs: number; totalMs: number }) => void) =>
   on("transcribe://progress", h);
 export const onModelDownload = (h: (e: { received: number; total: number }) => void) => on("model://download", h);
+export const onNotesModelDownload = (h: (e: { received: number; total: number }) => void) => on("notes-model://download", h);
 
 /** The text to show for any error from a command. */
 export function errorMessage(error: unknown): string {

@@ -1,14 +1,15 @@
 //! Runs the notes requests, saves the note, and reports the status.
 
 use super::prompt::{
-    LONG_TRANSCRIPT_TOKENS, PART_TOKENS, build_messages, build_messages_from_summaries,
-    clean_title, estimate_tokens, split_lines, summary_messages, title_messages, transcript_text,
+    build_messages, build_messages_from_summaries, clean_title, estimate_tokens, split_lines,
+    summary_messages, title_messages, transcript_text,
 };
+use crate::chat_model::ChatModel;
 use crate::db::SharedDb;
 use crate::db::meetings::{UNTITLED, get_meeting, record_usage, save_note, set_status, set_title};
 use crate::db::templates;
 use crate::events::{EventSink, NOTES_DONE, NOTES_FAILED, STATUS};
-use crate::llm::{ChatMessage, LlmConfig, chat};
+use crate::llm::ChatMessage;
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
 use serde_json::json;
 use std::sync::Arc;
@@ -16,10 +17,9 @@ pub use tokio_util::sync::CancellationToken;
 
 pub struct NotesContext {
     pub db: SharedDb,
-    pub http: reqwest::Client,
     pub sink: Arc<dyn EventSink>,
-    pub notes: LlmConfig,
-    pub quick: LlmConfig,
+    pub notes: Arc<dyn ChatModel>,
+    pub quick: Arc<dyn ChatModel>,
 }
 
 impl NotesContext {
@@ -35,17 +35,14 @@ impl NotesContext {
 
     async fn ask(
         &self,
-        cfg: &LlmConfig,
+        model: &dyn ChatModel,
         messages: Vec<ChatMessage>,
         cancel: &CancellationToken,
     ) -> Result<String> {
-        let result = tokio::select! {
-            r = chat(&self.http, cfg, &messages) => r?,
-            _ = cancel.cancelled() => return Err(MorselError::Cancelled),
-        };
+        let result = model.chat(&messages, cancel).await?;
         record_usage(
             &self.db.lock().expect("db lock"),
-            &cfg.model,
+            model.name(),
             result.prompt_tokens,
             result.completion_tokens,
             result.cost,
@@ -90,13 +87,14 @@ async fn run(
         let conn = ctx.db.lock().expect("db lock");
         (get_meeting(&conn, id)?, templates::get(&conn, template_id)?)
     };
-    let messages = if estimate_tokens(&transcript_text(&detail.lines)) > LONG_TRANSCRIPT_TOKENS {
-        let parts = split_lines(&detail.lines, PART_TOKENS);
+    let budget = ctx.notes.budget();
+    let messages = if estimate_tokens(&transcript_text(&detail.lines)) > budget.long_transcript {
+        let parts = split_lines(&detail.lines, budget.part);
         let mut summaries = Vec::with_capacity(parts.len());
         for (i, part) in parts.iter().enumerate() {
             summaries.push(
                 ctx.ask(
-                    &ctx.notes,
+                    ctx.notes.as_ref(),
                     summary_messages(&transcript_text(part), i + 1, parts.len()),
                     cancel,
                 )
@@ -107,16 +105,19 @@ async fn run(
     } else {
         build_messages(&template, &detail.user_notes, &detail.lines)
     };
-    let note = ctx.ask(&ctx.notes, messages, cancel).await?;
+    let note = ctx.ask(ctx.notes.as_ref(), messages, cancel).await?;
     save_note(
         &ctx.db.lock().expect("db lock"),
         id,
         &note,
-        &ctx.notes.model,
+        ctx.notes.name(),
     )?;
     if detail.summary.title == UNTITLED {
         // A missing title is not an error: the note is already saved.
-        if let Ok(raw) = ctx.ask(&ctx.quick, title_messages(&note), cancel).await {
+        if let Ok(raw) = ctx
+            .ask(ctx.quick.as_ref(), title_messages(&note), cancel)
+            .await
+        {
             let title = clean_title(&raw);
             if !title.is_empty() {
                 set_title(&ctx.db.lock().expect("db lock"), id, &title)?;
@@ -187,14 +188,18 @@ mod tests {
             .unwrap();
         }
         let sink = Arc::new(VecSink::default());
-        let cfg = |model: &str| LlmConfig {
-            base_url: format!("{}/v1", server.uri()),
-            model: model.into(),
-            api_key: "k".into(),
+        let cfg = |model: &str| -> Arc<dyn crate::chat_model::ChatModel> {
+            Arc::new(crate::chat_model::CloudChat::new(
+                reqwest::Client::new(),
+                crate::llm::LlmConfig {
+                    base_url: format!("{}/v1", server.uri()),
+                    model: model.into(),
+                    api_key: "k".into(),
+                },
+            ))
         };
         let ctx = NotesContext {
             db: Arc::new(std::sync::Mutex::new(conn)),
-            http: reqwest::Client::new(),
             sink: sink.clone(),
             notes: cfg("notes-model"),
             quick: cfg("quick-model"),
@@ -212,6 +217,39 @@ mod tests {
             .unwrap()
             .summary
             .status
+    }
+
+    #[tokio::test]
+    async fn local_budget_splits_a_7000_token_transcript() {
+        use crate::chat_model::{Budget, FakeChat};
+        let server = MockServer::start().await;
+        // 70 lines of 400 characters: about 7,000 tokens, over the local limit of 6,000.
+        let mut f = fixture(&server, "Weekly sync", 70, 400);
+        let fake = Arc::new(FakeChat::new(Budget::LOCAL, "notes"));
+        f.ctx.notes = fake.clone();
+        f.ctx.quick = fake.clone();
+        write_notes(&f.ctx, f.id, 1, CancellationToken::new())
+            .await
+            .unwrap();
+        let calls = fake.calls();
+        // Three part summaries of at most 3,000 tokens, then the final notes.
+        assert_eq!(calls.len(), 4);
+        for call in &calls {
+            let chars: usize = call.iter().map(|m| m.content.len()).sum();
+            assert!(chars / 4 < 3_000 + 1_000, "a call has {chars} characters");
+        }
+        let model: String = f
+            .ctx
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT model FROM notes WHERE meeting_id = ?1",
+                [f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(model, "fake");
     }
 
     #[tokio::test]

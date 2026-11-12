@@ -3,6 +3,15 @@ import { api, errorMessage, onCalendarChanged, type CalendarStatus, type Provide
 
 const NAMES: Record<Provider, string> = { google: "Google Calendar", outlook: "Outlook Calendar" };
 
+const PROJECT_KEY_HELP =
+  "Morsel needs a project API key that starts with ak_: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys.";
+
+// Composio rejects these key kinds in the x-api-key header that Morsel sends, so the panel stops them before the save.
+const WRONG_KEY_KINDS: ReadonlyArray<readonly [prefix: string, kind: string]> = [
+  ["uak_", "user"],
+  ["ck_", "Connect (MCP)"],
+];
+
 function stateText(s: ProviderStatus): string {
   if (s.state === "connected") return `Connected. ${s.today} ${s.today === 1 ? "meeting" : "meetings"} today.`;
   if (s.state === "pending") return "Waiting for the sign-in";
@@ -32,9 +41,9 @@ export function CalendarPanel() {
   const saveKey = async (e: FormEvent) => {
     e.preventDefault();
     if (!key.trim()) return;
-    // Composio refuses a user key (uak_) in the header that Morsel sends, so stop it here with the fix.
-    if (key.trim().startsWith("uak_")) {
-      setError("This is a Composio user key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys.");
+    const wrongKind = WRONG_KEY_KINDS.find(([prefix]) => key.trim().startsWith(prefix));
+    if (wrongKind) {
+      setError(`This is a Composio ${wrongKind[1]} key. ${PROJECT_KEY_HELP}`);
       return;
     }
     setError(null);

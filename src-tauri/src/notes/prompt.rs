@@ -81,6 +81,20 @@ fn system_prompt(template: &Template) -> String {
     )
 }
 
+fn format_reminder(template: &Template) -> String {
+    let headings: Vec<String> = template
+        .sections
+        .iter()
+        .map(|s| format!("## {}", s.name))
+        .collect();
+    format!(
+        "\nNow write the notes. Use these Markdown headings, in this order: {}. \
+         Start with `{}`. Write each action item as `- [ ] Owner: task`.",
+        headings.join(", "),
+        headings.first().map(String::as_str).unwrap_or("")
+    )
+}
+
 fn rough_notes(user_notes: &str) -> &str {
     if user_notes.trim().is_empty() {
         "(no rough notes)"
@@ -102,8 +116,9 @@ pub fn build_messages(
     vec![
         ChatMessage::system(system_prompt(template)),
         ChatMessage::user(format!(
-            "Rough notes:\n{}\n\nTranscript:\n{transcript}",
-            rough_notes(user_notes)
+            "Rough notes:\n{}\n\nTranscript:\n{transcript}{}",
+            rough_notes(user_notes),
+            format_reminder(template)
         )),
     ]
 }
@@ -131,8 +146,9 @@ pub fn build_messages_from_summaries(
     vec![
         ChatMessage::system(system_prompt(template)),
         ChatMessage::user(format!(
-            "Rough notes:\n{}\n\nThe transcript is long, so here are summaries of its parts, in order:\n{joined}",
-            rough_notes(user_notes)
+            "Rough notes:\n{}\n\nThe transcript is long, so here are summaries of its parts, in order:\n{joined}{}",
+            rough_notes(user_notes),
+            format_reminder(template)
         )),
     ]
 }
@@ -215,6 +231,22 @@ mod tests {
         let user = &build_messages(&template(), "budget ok", &lines)[1].content;
         assert!(user.contains("[0:05] You: hello\n[1:02] Others: hi"));
         assert!(user.contains("budget ok"));
+    }
+
+    /// A small model forgets the format after a long transcript, so the user message
+    /// repeats the headings at its end.
+    #[test]
+    fn user_message_ends_with_the_headings() {
+        let lines = [line(Speaker::You, 0, "hello")];
+        let reminder = "Use these Markdown headings, in this order: \
+                        ## Summary, ## Key points, ## Action items. Start with `## Summary`. \
+                        Write each action item as `- [ ] Owner: task`.";
+        let direct = &build_messages(&template(), "", &lines)[1].content;
+        let parts =
+            &build_messages_from_summaries(&template(), "", &["- budget ok".into()])[1].content;
+        for user in [direct, parts] {
+            assert!(user.ends_with(reminder), "{user}");
+        }
     }
 
     #[test]
