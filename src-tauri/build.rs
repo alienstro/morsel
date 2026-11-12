@@ -45,6 +45,12 @@ const COMMANDS: &[&str] = &[
     "start_from_reminder",
     "dismiss_reminder",
     "set_global_shortcut",
+    "audio_size",
+    "delete_audio",
+    "notes_model_status",
+    "download_notes_model",
+    "search_model_status",
+    "download_search_model",
 ];
 
 fn main() {

@@ -236,4 +236,39 @@ mod tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()));
         assert!(app.is_ok());
     }
+
+    /// The command names inside the first `[ ... ]` after `marker`, without module paths.
+    fn names_after(source: &str, marker: &str) -> std::collections::BTreeSet<String> {
+        let start = source.find(marker).expect("marker") + marker.len();
+        let body = &source[start..];
+        let body = &body[body.find('[').expect("[") + 1..body.find(']').expect("]")];
+        body.split(',')
+            .map(|s| s.trim().trim_matches('"').rsplit("::").next().unwrap_or("").to_owned())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// Tauri refuses a command with "not allowed by ACL" unless `build.rs` lists it
+    /// and a capability allows it. This test finds a missing entry before the app runs.
+    #[test]
+    fn each_command_is_listed_and_allowed() {
+        let handler = names_after(include_str!("lib.rs"), "generate_handler!");
+        let listed = names_after(include_str!("../build.rs"), "COMMANDS: &[&str] = &");
+        let mut allowed = std::collections::BTreeSet::new();
+        for file in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities/reminder.json"),
+        ] {
+            let caps: serde_json::Value = serde_json::from_str(file).expect("capability JSON");
+            for p in caps["permissions"].as_array().expect("permissions") {
+                if let Some(name) = p.as_str().and_then(|s| s.strip_prefix("allow-")) {
+                    allowed.insert(name.replace('-', "_"));
+                }
+            }
+        }
+        let not_listed: Vec<_> = handler.difference(&listed).collect();
+        let not_allowed: Vec<_> = handler.difference(&allowed).collect();
+        assert!(not_listed.is_empty(), "add to COMMANDS in build.rs: {not_listed:?}");
+        assert!(not_allowed.is_empty(), "add allow-<name> to a capability: {not_allowed:?}");
+    }
 }

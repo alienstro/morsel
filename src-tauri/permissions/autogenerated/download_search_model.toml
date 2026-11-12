@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-download-search-model"
+description = "Enables the download_search_model command without any pre-configured scope."
+commands.allow = ["download_search_model"]
+
+[[permission]]
+identifier = "deny-download-search-model"
+description = "Denies the download_search_model command without any pre-configured scope."
+commands.deny = ["download_search_model"]

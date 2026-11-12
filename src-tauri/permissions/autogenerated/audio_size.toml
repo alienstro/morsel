@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-audio-size"
+description = "Enables the audio_size command without any pre-configured scope."
+commands.allow = ["audio_size"]
+
+[[permission]]
+identifier = "deny-audio-size"
+description = "Denies the audio_size command without any pre-configured scope."
+commands.deny = ["audio_size"]
