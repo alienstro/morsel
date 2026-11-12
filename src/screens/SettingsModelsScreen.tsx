@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
-import { LOCAL_MODEL, useLocalModel } from "../lib/localModel";
+import { LOCAL_MODEL, type ModelDownload, type ModelInfo, NOTES_MODEL, useLocalModel, useNotesModel } from "../lib/localModel";
 import { TIMING_CHOICES } from "../lib/transcribeTiming";
 import "./note/note.css";
 
@@ -53,6 +53,7 @@ export function SettingsModelsScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
   const model = useLocalModel();
+  const notesModel = useNotesModel();
   const [usage, setUsage] = useState<UsageTotal | null>(null);
 
   useEffect(() => {
@@ -90,23 +91,34 @@ export function SettingsModelsScreen() {
 
       <section aria-labelledby="notes-ai" className="settings-section">
         <h2 id="notes-ai" className="section-title">Notes AI</h2>
-        <div className="field">
-          <label htmlFor="notes-base">Base URL (OpenRouter or any OpenAI-compatible API)</label>
-          <input id="notes-base" className="text-input" value={settings.notesBaseUrl} onChange={(e) => set("notesBaseUrl", e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="notes-model">Notes model</label>
-          <input id="notes-model" className="text-input" placeholder="For example: provider/model-name" value={settings.notesModel} onChange={(e) => set("notesModel", e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="quick-model">Quick model (titles and short questions; empty uses the notes model)</label>
-          <input id="quick-model" className="text-input" value={settings.quickModel} onChange={(e) => set("quickModel", e.target.value)} />
-        </div>
-        <KeyField account="notes_api_key" label="Notes API key" />
-        <div className="row">
-          <button type="button" className="btn" onClick={testKey}>Test key</button>
-          {keyMessage && <span className="small">{keyMessage}</span>}
-        </div>
+        <fieldset className="row">
+          <legend className="sr-only">Notes model location</legend>
+          <label><input type="radio" name="notes-mode" checked={settings.notesMode === "local"} onChange={() => set("notesMode", "local")} /> On this Mac (private, no key)</label>
+          <label><input type="radio" name="notes-mode" checked={settings.notesMode !== "local"} onChange={() => set("notesMode", "cloud")} /> Cloud (your key)</label>
+        </fieldset>
+        {settings.notesMode === "local" ? (
+          <LocalModelField model={notesModel} info={NOTES_MODEL} action="Download the notes model" />
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="notes-base">Base URL (OpenRouter or any OpenAI-compatible API)</label>
+              <input id="notes-base" className="text-input" value={settings.notesBaseUrl} onChange={(e) => set("notesBaseUrl", e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="notes-model">Notes model</label>
+              <input id="notes-model" className="text-input" placeholder="For example: provider/model-name" value={settings.notesModel} onChange={(e) => set("notesModel", e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="quick-model">Quick model (titles and short questions; empty uses the notes model)</label>
+              <input id="quick-model" className="text-input" value={settings.quickModel} onChange={(e) => set("quickModel", e.target.value)} />
+            </div>
+            <KeyField account="notes_api_key" label="Notes API key" />
+            <div className="row">
+              <button type="button" className="btn" onClick={testKey}>Test key</button>
+              {keyMessage && <span className="small">{keyMessage}</span>}
+            </div>
+          </>
+        )}
         {usage && <p className="muted small" style={{ margin: 0 }}>{usageText(usage)}</p>}
       </section>
 
@@ -118,7 +130,7 @@ export function SettingsModelsScreen() {
           <label><input type="radio" name="mode" checked={settings.transcribeMode === "cloud"} onChange={() => set("transcribeMode", "cloud")} /> Cloud (your key)</label>
         </fieldset>
         {settings.transcribeMode === "local" ? (
-          <LocalModelField model={model} />
+          <LocalModelField model={model} info={LOCAL_MODEL} action="Download the model" />
         ) : (
           <>
             <div className="field">
@@ -155,16 +167,18 @@ export function SettingsModelsScreen() {
   );
 }
 
-/** The download state of the on-device model, and the download button. */
-function LocalModelField({ model }: { model: ReturnType<typeof useLocalModel> }) {
+type LocalModelFieldProps = { model: ModelDownload; info: ModelInfo; action: string };
+
+/** The download state of one on-device model, and its download button. */
+function LocalModelField({ model, info, action }: LocalModelFieldProps) {
   const p = model.downloading ? model.progress : null;
   const percent = p && p.total > 0 ? Math.floor((p.received / p.total) * 100) : p ? 0 : null;
   return (
     <div className="field">
-      <span>{LOCAL_MODEL.name} model ({LOCAL_MODEL.size}): {model.ready ? "ready" : "not downloaded"}</span>
-      <span className="muted small">{LOCAL_MODEL.about}</span>
+      <span>{info.name} model ({info.size}): {model.ready ? "ready" : "not downloaded"}</span>
+      <span className="muted small">{info.about}</span>
       {!model.ready && percent === null && (
-        <button type="button" className="btn" onClick={model.download}>Download the model</button>
+        <button type="button" className="btn" onClick={model.download}>{action}</button>
       )}
       {percent !== null && (
         <>

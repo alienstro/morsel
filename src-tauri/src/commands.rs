@@ -3,20 +3,25 @@
 use crate::ask::{self, AskAnswer, AskRange};
 use crate::audio::recording::audio_dir;
 use crate::audio::{mic::MicSource, source::AudioSource, system_tap::SystemTapSource};
+use crate::chat_model::{ChatModel, CloudChat};
 use crate::db::library::{self, NotesFilter, NotesPage, UsageTotal};
 use crate::db::meetings::{self, MeetingDetail, MeetingSummary};
 use crate::db::templates::{self, Template, TemplateInput};
 use crate::db::{SharedDb, now_ms};
-use crate::events::{EventSink, MODEL_DOWNLOAD, NOTES_FAILED, STATUS};
+use crate::events::{EventSink, MODEL_DOWNLOAD, NOTES_FAILED, NOTES_MODEL_DOWNLOAD, STATUS};
 use crate::llm::{self, LlmConfig};
+use crate::local_llm::{
+    LocalLlm, NOTES_FILE, notes_model_dir, notes_model_files, notes_model_ready,
+};
+use crate::model_manager::{LocalChat, ModelManager, Purpose, WhisperControl};
 use crate::notes::writer::{CancellationToken, NotesContext};
 use crate::secrets::{ACCOUNTS, NOTES_KEY, SecretStore, TRANSCRIBE_KEY, is_known_account};
 use crate::session::{MeetingSession, MeetingSetup};
-use crate::settings::{self, Settings, TranscribeMode, TranscribeTiming};
+use crate::settings::{self, NotesMode, Settings, TranscribeMode, TranscribeTiming};
 use crate::transcribe::Transcriber;
 use crate::transcribe::after::{AfterQueue, transcribe_meeting};
 use crate::transcribe::cloud::CloudTranscriber;
-use crate::transcribe::model_download::{ensure_model, model_dir, model_ready};
+use crate::transcribe::model_download::{ensure_files, ensure_model, model_dir, model_ready};
 use crate::transcribe::whisper::WhisperTranscriber;
 use crate::types::{MeetingId, MeetingStatus, MorselError, Result};
 use serde::{Deserialize, Serialize};
@@ -33,6 +38,24 @@ pub trait Engines: Send + Sync {
     fn mic(&self) -> Box<dyn AudioSource>;
     fn system(&self) -> Box<dyn AudioSource>;
     fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>>;
+    /// True while a recording or a transcription uses the on-device Whisper model.
+    fn whisper_in_use(&self) -> bool {
+        false
+    }
+    /// Frees the cached Whisper model when nothing uses it.
+    fn free_whisper(&self) {}
+}
+
+/// Lets the local notes model see Whisper through the engines.
+pub struct EnginesWhisper(pub Arc<dyn Engines>);
+
+impl WhisperControl for EnginesWhisper {
+    fn in_use(&self) -> bool {
+        self.0.whisper_in_use()
+    }
+    fn free(&self) {
+        self.0.free_whisper()
+    }
 }
 
 /// The loaded on-device transcriber, with the language that it was loaded for.
@@ -44,15 +67,22 @@ pub struct RealEngines {
     http: reqwest::Client,
     secrets: Arc<dyn SecretStore>,
     local: Mutex<Option<LoadedLocal>>,
+    notes_model: Arc<ModelManager<LocalLlm>>,
 }
 
 impl RealEngines {
-    pub fn new(models_root: PathBuf, http: reqwest::Client, secrets: Arc<dyn SecretStore>) -> Self {
+    pub fn new(
+        models_root: PathBuf,
+        http: reqwest::Client,
+        secrets: Arc<dyn SecretStore>,
+        notes_model: Arc<ModelManager<LocalLlm>>,
+    ) -> Self {
         Self {
             models_root,
             http,
             secrets,
             local: Mutex::new(None),
+            notes_model,
         }
     }
 }
@@ -75,6 +105,8 @@ impl Engines for RealEngines {
                 {
                     return Ok(t.clone());
                 }
+                // An 8 GB Mac cannot hold Whisper and the notes model at the same time.
+                self.notes_model.unload();
                 let dir = model_dir(&self.models_root);
                 if !model_ready(&dir) {
                     return Err(MorselError::Invalid(
@@ -97,6 +129,23 @@ impl Engines for RealEngines {
                     key,
                 )))
             }
+        }
+    }
+
+    fn whisper_in_use(&self) -> bool {
+        let cached = self.local.lock().expect("local transcriber lock");
+        cached
+            .as_ref()
+            .is_some_and(|(_, t)| Arc::strong_count(t) > 1)
+    }
+
+    fn free_whisper(&self) {
+        let mut cached = self.local.lock().expect("local transcriber lock");
+        if cached
+            .as_ref()
+            .is_some_and(|(_, t)| Arc::strong_count(t) == 1)
+        {
+            *cached = None;
         }
     }
 }
@@ -162,6 +211,12 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
+/// The on-device models: the folder that holds their files, and the loaded notes model.
+pub struct LocalModels {
+    pub root: PathBuf,
+    pub notes_model: Arc<ModelManager<LocalLlm>>,
+}
+
 pub struct AppState {
     pub db: SharedDb,
     pub secrets: Arc<dyn SecretStore>,
@@ -173,6 +228,7 @@ pub struct AppState {
     session: tokio::sync::Mutex<Option<MeetingSession>>,
     notes_jobs: Arc<Mutex<HashMap<MeetingId, CancellationToken>>>,
     after: AfterQueue,
+    notes_model: Arc<ModelManager<LocalLlm>>,
 }
 
 impl AppState {
@@ -183,8 +239,12 @@ impl AppState {
         sink: Arc<dyn EventSink>,
         engines: Arc<dyn Engines>,
         data_dir: PathBuf,
-        models_root: PathBuf,
+        models: LocalModels,
     ) -> Self {
+        let LocalModels {
+            root: models_root,
+            notes_model,
+        } = models;
         Self {
             db,
             secrets,
@@ -196,7 +256,85 @@ impl AppState {
             session: tokio::sync::Mutex::new(None),
             notes_jobs: Arc::new(Mutex::new(HashMap::new())),
             after: AfterQueue::default(),
+            notes_model,
         }
+    }
+
+    /// The settings for the Settings screen, with the notes mode that Morsel uses now.
+    pub fn shown_settings(&self) -> Result<Settings> {
+        let mut settings = self.settings()?;
+        settings.notes_mode = Some(self.notes_mode()?);
+        Ok(settings)
+    }
+
+    /// The saved choice, or Cloud for an install that already has a notes key, or Local.
+    pub fn notes_mode(&self) -> Result<NotesMode> {
+        if let Some(mode) = self.settings()?.notes_mode {
+            return Ok(mode);
+        }
+        Ok(if self.secrets.get(NOTES_KEY)?.is_some() {
+            NotesMode::Cloud
+        } else {
+            NotesMode::Local
+        })
+    }
+
+    fn local_chat(&self, purpose: Purpose) -> Result<Arc<dyn ChatModel>> {
+        let dir = notes_model_dir(&self.models_root);
+        if !notes_model_ready(&dir) {
+            return Err(MorselError::Invalid(
+                "download the notes model in Settings first".into(),
+            ));
+        }
+        Ok(Arc::new(LocalChat::new(
+            self.notes_model.clone(),
+            dir.join(NOTES_FILE),
+            Arc::new(EnginesWhisper(self.engines.clone())),
+            purpose,
+        )))
+    }
+
+    /// The notes model and the quick model (titles, Ask) for the chosen mode.
+    fn chat_models(&self, purpose: Purpose) -> Result<(Arc<dyn ChatModel>, Arc<dyn ChatModel>)> {
+        if self.notes_mode()? == NotesMode::Local {
+            let local = self.local_chat(purpose)?;
+            return Ok((local.clone(), local));
+        }
+        let settings = self.settings()?;
+        let notes = self.notes_config(&settings.notes_model)?;
+        if notes.model.trim().is_empty() {
+            return Err(MorselError::Invalid(
+                "choose a notes model in Settings first".into(),
+            ));
+        }
+        let quick = LlmConfig {
+            model: quick_model_name(&settings).to_owned(),
+            ..notes.clone()
+        };
+        Ok((
+            Arc::new(CloudChat::new(self.http.clone(), notes)),
+            Arc::new(CloudChat::new(self.http.clone(), quick)),
+        ))
+    }
+
+    pub fn notes_model_ready(&self) -> bool {
+        notes_model_ready(&notes_model_dir(&self.models_root))
+    }
+
+    pub async fn download_notes_model(&self) -> Result<()> {
+        let sink = self.sink.clone();
+        ensure_files(
+            &self.http,
+            &notes_model_dir(&self.models_root),
+            &notes_model_files(),
+            move |received, total| {
+                sink.emit(
+                    NOTES_MODEL_DOWNLOAD,
+                    json!({ "received": received, "total": total }),
+                );
+            },
+        )
+        .await
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
@@ -481,20 +619,9 @@ impl AppState {
 
     /// Starts writing the note in the background. The result comes as a `notes://done` or `notes://failed` event.
     pub fn write_notes(&self, meeting_id: MeetingId, template_id: i64) -> Result<()> {
-        let settings = self.settings()?;
-        let notes = self.notes_config(&settings.notes_model)?;
-        if notes.model.trim().is_empty() {
-            return Err(MorselError::Invalid(
-                "choose a notes model in Settings first".into(),
-            ));
-        }
-        let quick = LlmConfig {
-            model: quick_model_name(&settings).to_owned(),
-            ..notes.clone()
-        };
+        let (notes, quick) = self.chat_models(Purpose::Notes)?;
         let ctx = NotesContext {
             db: self.db.clone(),
-            http: self.http.clone(),
             sink: self.sink.clone(),
             notes,
             quick,
@@ -587,14 +714,8 @@ impl AppState {
         range: AskRange,
         meeting_id: Option<MeetingId>,
     ) -> Result<AskAnswer> {
-        let settings = self.settings()?;
-        let quick = self.notes_config(quick_model_name(&settings))?;
-        if quick.model.trim().is_empty() {
-            return Err(MorselError::Invalid(
-                "choose a notes model in Settings first".into(),
-            ));
-        }
-        ask::ask(&self.db, &self.http, &quick, question, range, meeting_id).await
+        let (_, quick) = self.chat_models(Purpose::Ask)?;
+        ask::ask(&self.db, quick.as_ref(), question, range, meeting_id).await
     }
 
     pub fn list_asks(&self, limit: u32) -> Result<Vec<AskAnswer>> {
@@ -771,7 +892,7 @@ pub async fn list_templates(state: State<'_, AppState>) -> Result<Vec<Template>>
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
-    state.settings()
+    state.shown_settings()
 }
 
 #[tauri::command]
@@ -825,6 +946,16 @@ pub async fn model_status(state: State<'_, AppState>) -> Result<bool> {
 #[tauri::command]
 pub async fn download_model(state: State<'_, AppState>) -> Result<()> {
     state.download_model().await
+}
+
+#[tauri::command]
+pub async fn notes_model_status(state: State<'_, AppState>) -> Result<bool> {
+    Ok(state.notes_model_ready())
+}
+
+#[tauri::command]
+pub async fn download_notes_model(state: State<'_, AppState>) -> Result<()> {
+    state.download_notes_model().await
 }
 
 #[tauri::command]
@@ -955,6 +1086,13 @@ mod tests {
         }
     }
 
+    fn test_notes_model() -> Arc<ModelManager<LocalLlm>> {
+        Arc::new(ModelManager::new(
+            Box::new(|p| LocalLlm::load(p).map(Arc::new)),
+            crate::model_manager::IDLE,
+        ))
+    }
+
     fn state() -> (tempfile::TempDir, AppState) {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(&dir.path().join("m.db")).unwrap();
@@ -965,7 +1103,10 @@ mod tests {
             Arc::new(VecSink::default()),
             Arc::new(FakeEngines),
             dir.path().to_path_buf(),
-            dir.path().join("models"),
+            LocalModels {
+                root: dir.path().join("models"),
+                notes_model: test_notes_model(),
+            },
         );
         (dir, state)
     }
@@ -981,7 +1122,10 @@ mod tests {
             sink.clone(),
             Arc::new(FakeEngines),
             dir.path().to_path_buf(),
-            dir.path().join("models"),
+            LocalModels {
+                root: dir.path().join("models"),
+                notes_model: test_notes_model(),
+            },
         );
         (dir, Arc::new(state), sink)
     }
@@ -989,6 +1133,8 @@ mod tests {
     fn use_after_mode(s: &AppState) {
         let mut settings = s.settings().unwrap();
         settings.transcribe_timing = TranscribeTiming::After;
+        // These tests check the after job. Cloud mode with no key makes its notes step fail fast.
+        settings.notes_mode = Some(NotesMode::Cloud);
         s.save_settings(&settings).unwrap();
     }
 
@@ -1234,9 +1380,61 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn new_install_uses_local() {
+        let (_d, s) = state();
+        assert_eq!(s.notes_mode().unwrap(), NotesMode::Local);
+    }
+
+    #[test]
+    fn install_with_a_notes_key_keeps_cloud() {
+        let (_d, s) = state();
+        s.set_api_key(NOTES_KEY, "sk-1").unwrap();
+        assert_eq!(s.notes_mode().unwrap(), NotesMode::Cloud);
+    }
+
+    #[test]
+    fn shown_settings_hold_the_effective_mode() {
+        let (_d, s) = state();
+        assert_eq!(
+            s.shown_settings().unwrap().notes_mode,
+            Some(NotesMode::Local)
+        );
+        s.set_api_key(NOTES_KEY, "sk-1").unwrap();
+        assert_eq!(
+            s.shown_settings().unwrap().notes_mode,
+            Some(NotesMode::Cloud)
+        );
+    }
+
+    #[test]
+    fn saved_mode_wins() {
+        let (_d, s) = state();
+        s.set_api_key(NOTES_KEY, "sk-1").unwrap();
+        let mut settings = s.settings().unwrap();
+        settings.notes_mode = Some(NotesMode::Local);
+        s.save_settings(&settings).unwrap();
+        assert_eq!(s.notes_mode().unwrap(), NotesMode::Local);
+    }
+
+    #[tokio::test]
+    async fn local_write_notes_without_the_model_fails_with_help() {
+        let (_d, s) = state();
+        let id = s.start_meeting(Some("Sync".into()), 1).await.unwrap();
+        s.stop_meeting().await.unwrap();
+        let err = s.write_notes(id, 1).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid value: download the notes model in Settings first"
+        );
+    }
+
     #[tokio::test]
     async fn write_notes_needs_a_notes_key() {
         let (_d, s) = state();
+        let mut settings = s.settings().unwrap();
+        settings.notes_mode = Some(NotesMode::Cloud);
+        s.save_settings(&settings).unwrap();
         let id = s.start_meeting(Some("Sync".into()), 1).await.unwrap();
         s.stop_meeting().await.unwrap();
         assert!(matches!(s.write_notes(id, 1), Err(MorselError::Invalid(_))));

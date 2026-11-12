@@ -1,9 +1,10 @@
 //! Ask Morsel: finds the best meetings for a question, and lets the quick model answer from them only.
 
+use crate::chat_model::ChatModel;
 use crate::db::library::{fts_query, save_ask};
 use crate::db::meetings::{get_meeting, record_usage};
 use crate::db::{SharedDb, now_ms};
-use crate::llm::{ChatMessage, LlmConfig, chat};
+use crate::llm::ChatMessage;
 use crate::notes::prompt::transcript_text;
 use crate::types::{MeetingId, MorselError, Result};
 use rusqlite::{Connection, params};
@@ -127,8 +128,7 @@ fn meeting_block(
 /// A question across meetings is saved; a question about one meeting is not.
 pub async fn ask(
     db: &SharedDb,
-    http: &reqwest::Client,
-    quick: &LlmConfig,
+    model: &dyn ChatModel,
     question: &str,
     range: AskRange,
     meeting: Option<MeetingId>,
@@ -146,7 +146,7 @@ pub async fn ask(
         let share = if ids.is_empty() {
             0
         } else {
-            ASK_TOKENS * 4 / ids.len()
+            model.budget().ask * 4 / ids.len()
         };
         let mut sources = Vec::with_capacity(ids.len());
         let mut blocks = Vec::with_capacity(ids.len());
@@ -168,10 +168,12 @@ pub async fn ask(
                 blocks.join("\n---\n")
             )),
         ];
-        let result = chat(http, quick, &messages).await?;
+        let result = model
+            .chat(&messages, &tokio_util::sync::CancellationToken::new())
+            .await?;
         record_usage(
             &db.lock().expect("db lock"),
-            &quick.model,
+            model.name(),
             result.prompt_tokens,
             result.completion_tokens,
             result.cost,
@@ -224,12 +226,15 @@ mod tests {
         id
     }
 
-    fn config(server: &MockServer) -> LlmConfig {
-        LlmConfig {
-            base_url: server.uri(),
-            model: "quick".into(),
-            api_key: "k".into(),
-        }
+    fn config(server: &MockServer) -> crate::chat_model::CloudChat {
+        crate::chat_model::CloudChat::new(
+            reqwest::Client::new(),
+            crate::llm::LlmConfig {
+                base_url: server.uri(),
+                model: "quick".into(),
+                api_key: "k".into(),
+            },
+        )
     }
 
     fn reply(text: &str) -> ResponseTemplate {
@@ -289,7 +294,6 @@ mod tests {
 
         let answer = ask(
             &db,
-            &reqwest::Client::new(),
             &config(&server),
             " What did Acme say about the discount? ",
             AskRange::All,
@@ -329,7 +333,6 @@ mod tests {
             .await;
         let answer = ask(
             &db,
-            &reqwest::Client::new(),
             &config(&server),
             "What about the discount?",
             AskRange::All,
@@ -339,6 +342,37 @@ mod tests {
         .unwrap();
         assert_eq!(answer.answer, NO_MATCH);
         assert!(answer.sources.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ask_uses_the_model_budget() {
+        use crate::chat_model::{Budget, FakeChat};
+        let (_d, db) = temp_db();
+        let id = meeting(&db, "Marathon", now_ms() - DAY, "discount");
+        {
+            let conn = db.lock().unwrap();
+            let text = "discount talk ".repeat(500);
+            for i in 0..20u64 {
+                add_line(
+                    &conn,
+                    &TranscriptLine {
+                        meeting_id: id,
+                        speaker: Speaker::Others,
+                        start_ms: i * 1000,
+                        end_ms: i * 1000 + 900,
+                        text: text.clone(),
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let fake = FakeChat::new(Budget::LOCAL, "ok");
+        ask(&db, &fake, "discount", AskRange::All, None)
+            .await
+            .unwrap();
+        let calls = fake.calls();
+        let chars: usize = calls[0].iter().map(|m| m.content.len()).sum();
+        assert!(chars / 4 < 6_000 + 500, "the prompt has {chars} characters");
     }
 
     #[tokio::test]
@@ -367,16 +401,9 @@ mod tests {
             .respond_with(reply("ok"))
             .mount(&server)
             .await;
-        ask(
-            &db,
-            &reqwest::Client::new(),
-            &config(&server),
-            "discount",
-            AskRange::All,
-            None,
-        )
-        .await
-        .unwrap();
+        ask(&db, &config(&server), "discount", AskRange::All, None)
+            .await
+            .unwrap();
         let body = &server.received_requests().await.unwrap()[0].body;
         assert!(
             body.len() / 4 < ASK_TOKENS + 2_000,
@@ -397,7 +424,6 @@ mod tests {
             .await;
         let answer = ask(
             &db,
-            &reqwest::Client::new(),
             &config(&server),
             "Who is blocked?",
             AskRange::All,

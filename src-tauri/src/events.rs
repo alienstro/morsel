@@ -9,6 +9,7 @@ pub const STATUS: &str = "meeting://status";
 pub const NOTES_DONE: &str = "notes://done";
 pub const NOTES_FAILED: &str = "notes://failed";
 pub const MODEL_DOWNLOAD: &str = "model://download";
+pub const NOTES_MODEL_DOWNLOAD: &str = "notes-model://download";
 /// After mode: `{ meetingId, doneMs, totalMs }` after each chunk.
 pub const TRANSCRIBE_PROGRESS: &str = "transcribe://progress";
 

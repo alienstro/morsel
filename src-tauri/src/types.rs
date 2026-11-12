@@ -102,7 +102,7 @@ pub enum MorselError {
     InvalidKey,
     /// Composio has several kinds of key, and only a project key works for Morsel.
     #[error(
-        "Composio did not accept this key. Morsel needs a project API key: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys."
+        "Composio did not accept this key. Morsel needs a project API key that starts with ak_: on composio.dev, open Settings, then Project Settings, and copy a key from API Keys."
     )]
     InvalidComposioKey,
     #[error("the provider rate limit is reached")]

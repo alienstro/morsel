@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../test/ta
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../test/tauri")).listen }));
 
 const settings = {
-  notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
+  notesMode: "cloud", notesBaseUrl: "https://openrouter.ai/api/v1", notesModel: "", quickModel: "", transcribeMode: "local", transcribeTiming: "live",
   transcribeBaseUrl: "https://api.groq.com/openai/v1", transcribeModel: "whisper-large-v3-turbo", language: "auto",
 };
 
@@ -137,6 +137,36 @@ describe("SettingsModelsScreen", () => {
     await vi.waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("save_settings", { settings: { ...settings, transcribeTiming: "after" } }),
     );
+  });
+
+  it("notes_mode_switch_saves_local", async () => {
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("radio", { name: "On this Mac (private, no key)" }));
+    expect(screen.queryByLabelText("Notes API key")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("save_settings", { settings: { ...settings, notesMode: "local" } }),
+    );
+  });
+
+  it("local_mode_shows_the_download_and_size", async () => {
+    responses.get_settings = { ...settings, notesMode: "local" };
+    responses.notes_model_status = false;
+    responses.download_notes_model = () => new Promise(() => {});
+    renderAt("/settings/models");
+    expect(await screen.findByText(/MiniCPM-V-4 model \(2\.96 GB\): not downloaded/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Notes API key")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download the notes model" }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("download_notes_model"));
+    act(() => emit("notes-model://download", { received: 740_000_000, total: 2_960_000_000 }));
+    expect(await screen.findByText("Downloading: 25%")).toBeInTheDocument();
+  });
+
+  it("cloud_mode_shows_the_key_fields", async () => {
+    renderAt("/settings/models");
+    expect(await screen.findByLabelText("Notes API key")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Cloud (your key)" , checked: true })).toBeInTheDocument();
+    expect(screen.queryByText(/MiniCPM-V-4/)).not.toBeInTheDocument();
   });
 
   it("save_settings_sends_the_form", async () => {

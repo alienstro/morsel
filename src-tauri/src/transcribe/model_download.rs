@@ -1,4 +1,4 @@
-//! Downloads the on-device Whisper Turbo model one time, with progress and a SHA-256 check.
+//! Downloads the on-device models one time, with progress, resume, and a SHA-256 check.
 
 use crate::types::{MorselError, Result};
 use sha2::{Digest, Sha256};
@@ -9,6 +9,8 @@ const WHISPER_REPO: &str = "https://huggingface.co/csukuangfj/sherpa-onnx-whispe
 const WHISPER_DIR: &str = "whisper-turbo-int8";
 /// Model folders that an earlier version of Morsel downloaded. Morsel deletes them.
 const OLD_MODEL_DIRS: [&str; 1] = ["parakeet-tdt-0.6b-v3-int8"];
+/// Each file gets this many tries when the network fails. The part file stays between them.
+const ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelFile {
@@ -78,7 +80,7 @@ pub fn model_ready(dir: &Path) -> bool {
     whisper_files().iter().all(|f| file_ready(dir, f))
 }
 
-fn file_ready(dir: &Path, file: &ModelFile) -> bool {
+pub(crate) fn file_ready(dir: &Path, file: &ModelFile) -> bool {
     std::fs::metadata(dir.join(&file.name))
         .map(|m| m.len() == file.size)
         .unwrap_or(false)
@@ -108,13 +110,38 @@ pub async fn ensure_files(
         .filter(|f| file_ready(dir, f))
         .map(|f| f.size)
         .sum();
-    on_progress(received, total);
+    // The bytes in part files count too, so that a resumed download does not show 0 % first.
+    let resumed: u64 = files
+        .iter()
+        .filter(|f| !file_ready(dir, f))
+        .filter_map(|f| {
+            let len = std::fs::metadata(dir.join(format!("{}.part", f.name)))
+                .ok()?
+                .len();
+            (len < f.size).then_some(len)
+        })
+        .sum();
+    on_progress(received + resumed, total);
     for file in files.iter().filter(|f| !file_ready(dir, f)) {
         let part = dir.join(format!("{}.part", file.name));
-        let result = download_one(http, file, &part, &mut received, total, &on_progress).await;
-        if result.is_err() {
-            let _ = std::fs::remove_file(&part);
-            return result;
+        let before = received;
+        let mut attempt = 1;
+        loop {
+            received = before;
+            match download_one(http, file, &part, &mut received, total, &on_progress).await {
+                Ok(()) => break,
+                // A network error keeps the part file, so that the next attempt continues from it.
+                Err(MorselError::Http(_)) if attempt < ATTEMPTS => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64))
+                        .await;
+                    attempt += 1;
+                }
+                Err(err @ MorselError::Http(_)) => return Err(err),
+                Err(err) => {
+                    let _ = std::fs::remove_file(&part);
+                    return Err(err);
+                }
+            }
         }
         std::fs::rename(&part, dir.join(&file.name))?;
     }
@@ -129,14 +156,34 @@ async fn download_one(
     total: u64,
     on_progress: &impl Fn(u64, u64),
 ) -> Result<()> {
-    let mut response = http
-        .get(&file.url)
+    let mut hasher = Sha256::new();
+    let mut offset = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    if offset >= file.size {
+        // A part file of the full size or more is wrong: start again.
+        offset = 0;
+    }
+    if offset > 0 {
+        hasher.update(std::fs::read(part)?);
+    }
+    let mut request = http.get(&file.url);
+    if offset > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
+    }
+    let mut response = request
         .send()
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| MorselError::Http(e.without_url().to_string()))?;
-    let mut out = std::fs::File::create(part)?;
-    let mut hasher = Sha256::new();
+    let mut out = if offset > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+        std::fs::OpenOptions::new().append(true).open(part)?
+    } else {
+        // The server sends the whole file: start the part file and the checksum again.
+        offset = 0;
+        hasher = Sha256::new();
+        std::fs::File::create(part)?
+    };
+    *received += offset;
+    on_progress(*received, total);
     while let Some(chunk) = response
         .chunk()
         .await
@@ -194,6 +241,67 @@ mod tests {
         );
         assert_eq!(*last.lock().unwrap(), (3000, 3000));
         assert!(!dir.path().join("a.onnx.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_broken_download_resumes_from_the_part_file() {
+        use wiremock::matchers::header;
+        let body: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("range", "bytes=1000-"))
+            .respond_with(ResponseTemplate::new(206).set_body_bytes(body[1000..].to_vec()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.onnx.part"), &body[..1000]).unwrap();
+        let files = vec![file(&server, "a.onnx", &body, None)];
+        let first = std::sync::Mutex::new(None);
+        ensure_files(&reqwest::Client::new(), dir.path(), &files, |r, _| {
+            first.lock().unwrap().get_or_insert(r);
+        })
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(dir.path().join("a.onnx")).unwrap(), body);
+        assert_eq!(*first.lock().unwrap(), Some(1000));
+    }
+
+    #[tokio::test]
+    async fn a_server_without_range_support_restarts_the_file() {
+        let body = vec![5u8; 2000];
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.onnx.part"), [5u8; 700]).unwrap();
+        let files = vec![file(&server, "a.onnx", &body, None)];
+        ensure_files(&reqwest::Client::new(), dir.path(), &files, |_, _| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(dir.path().join("a.onnx")).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn a_network_error_keeps_the_part_file() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.onnx.part"), [1u8; 50]).unwrap();
+        let files = vec![file(&server, "a.onnx", &[1u8; 100], None)];
+        let err = ensure_files(&reqwest::Client::new(), dir.path(), &files, |_, _| {})
+            .await
+            .unwrap_err();
+        assert!(matches!(err, MorselError::Http(_)));
+        assert_eq!(
+            std::fs::read(dir.path().join("a.onnx.part")).unwrap().len(),
+            50
+        );
     }
 
     #[tokio::test]
