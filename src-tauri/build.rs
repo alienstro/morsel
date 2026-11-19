@@ -54,9 +54,27 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    link_compiler_runtime();
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
     )
     .expect("failed to run the Tauri build script");
+}
+
+/// The Metal code of llama.cpp uses `@available(macOS 15.0, *)`. With a lower minimum macOS,
+/// that check calls `___isPlatformVersionAtLeast`. LTO drops the weak copy in Rust `std`,
+/// so the release link fails unless the clang runtime library supplies the function.
+fn link_compiler_runtime() {
+    // The build script runs on the host, so read the target from Cargo, not from `cfg!`.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        return;
+    }
+    let out = std::process::Command::new("clang")
+        .arg("--print-runtime-dir")
+        .output()
+        .expect("clang must be installed to find its runtime library");
+    let dir = String::from_utf8(out.stdout).expect("clang printed a path that is not UTF-8");
+    println!("cargo:rustc-link-search=native={}", dir.trim());
+    println!("cargo:rustc-link-lib=static=clang_rt.osx");
 }
