@@ -61,7 +61,7 @@ In the repository, open Settings › Secrets and variables › Actions, and add:
 
 1. Set the new version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
 2. Merge the change to `main`.
-3. Push a tag with the same version: `git tag v0.2.0 && git push origin v0.2.0`.
+3. Start the "Release" workflow by hand: `gh workflow run release.yml --ref main`. A tag push does not start it, because a build takes about 30 macOS minutes. The tag `v<version>` comes when you publish the release.
 4. The "Release" workflow tests, builds, signs and notarizes the app. Then it makes a draft release with the DMG, the update archive and `latest.json`.
 5. Open the draft release on GitHub, write the notes, and click "Publish release".
 

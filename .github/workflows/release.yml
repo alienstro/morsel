@@ -1,10 +1,8 @@
 # Builds, signs and notarizes the universal macOS app, then makes a draft GitHub release
-# with the DMG, the update archive and latest.json. Runs on a version tag such as v0.2.0.
+# with the DMG, the update archive and latest.json. Runs only when started by hand, because a build takes about 30 macOS minutes.
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
