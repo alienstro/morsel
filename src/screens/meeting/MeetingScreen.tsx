@@ -4,6 +4,7 @@ import {
   api, clock, errorMessage, onLevels, onStatus, onTranscript,
   type MeetingDetail, type MeetingStatus, type MeetingSummary, type TranscriptLine,
 } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { Notepad } from "./Notepad";
 import { TranscriptPanel } from "./TranscriptPanel";
 import "./meeting.css";
@@ -171,7 +172,7 @@ export function MeetingScreen() {
             <article className="meeting-article">
               <h1 className="serif meeting-title">{detail.summary.title}</h1>
               <div className="meeting-meta muted">
-                <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+                <span>{formatWhen(detail.summary.startedAt)}</span>
                 <span className="chip">{detail.summary.templateName}</span>
               </div>
               <Notepad initial={detail.userNotes} onChange={onNotesChange} />

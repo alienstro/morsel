@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { markYours, type NotePart } from "../../lib/markYours";
 import "./note.css";
 
@@ -124,7 +125,7 @@ export function NoteScreen() {
     <div className="page">
       <h1 className="serif page-title">{detail.summary.title}</h1>
       <div className="row muted small">
-        <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+        <span>{formatWhen(detail.summary.startedAt)}</span>
         <span className="chip">{detail.summary.templateName}</span>
       </div>
       <div className="row">
