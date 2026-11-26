@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
@@ -33,6 +33,7 @@ async function renderScreen() {
 
 beforeEach(() => {
   resetTauri();
+  sessionStorage.clear();
   responses.get_meeting = detail;
   responses.list_meetings = [detail.summary];
 });
@@ -41,7 +42,68 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Renders at a fixed start time. Fake timers still move with real time, so `findBy` works. */
+async function renderAt(status: string, startedAt = 1_000_000) {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(startedAt);
+  responses.get_meeting = { ...detail, summary: { ...detail.summary, status, startedAt } };
+  await renderScreen();
+  vi.setSystemTime(startedAt);
+}
+
+function wait(ms: number) {
+  act(() => vi.advanceTimersByTime(ms));
+}
+
+function setStatus(status: string) {
+  act(() => emit("meeting://status", { meetingId: 1, status }));
+}
+
 describe("MeetingScreen", () => {
+  it("clock_does_not_count_the_paused_time", async () => {
+    await renderAt("recording");
+    wait(3000);
+    setStatus("paused");
+    wait(10_000);
+    expect(screen.getByText("0:03")).toBeInTheDocument();
+    setStatus("recording");
+    wait(1000);
+    expect(screen.getByText("0:04")).toBeInTheDocument();
+  });
+
+  it("clock_adds_only_the_recorded_parts_after_two_pauses", async () => {
+    await renderAt("recording");
+    wait(3000);
+    setStatus("paused");
+    wait(10_000);
+    setStatus("recording");
+    wait(2000);
+    setStatus("paused");
+    wait(20_000);
+    setStatus("recording");
+    wait(1000);
+    expect(screen.getByText("0:06")).toBeInTheDocument();
+  });
+
+  it("clock_after_a_reload_while_paused_shows_the_recorded_time", async () => {
+    await renderAt("recording");
+    wait(3000);
+    setStatus("paused");
+    wait(10_000);
+    cleanup();
+    responses.get_meeting = { ...detail, summary: { ...detail.summary, status: "paused", startedAt: 1_000_000 } };
+    await renderScreen();
+    wait(5000);
+    expect(screen.getByText("0:03")).toBeInTheDocument();
+  });
+
+  it("clock_shows_hours_after_60_minutes", async () => {
+    await renderAt("recording");
+    // The 1 s tick started at mount, a few ms before renderAt reset the time, so wait one more tick.
+    wait(3_726_000);
+    expect(screen.getByText("1:02:05")).toBeInTheDocument();
+  });
+
   it("new_transcript_event_adds_a_line_with_speaker_label", async () => {
     await renderScreen();
     act(() => emit("meeting://transcript", { meetingId: 1, speaker: "others", startMs: 62_000, endMs: 70_000, text: "Probably one week late." }));
