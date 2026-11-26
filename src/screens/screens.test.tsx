@@ -100,7 +100,38 @@ describe("SettingsModelsScreen", () => {
     expect((await screen.findAllByText("A key is saved.")).length).toBeGreaterThan(0);
   });
 
+  it("test_key_saves_the_form_values_first", async () => {
+    responses.has_api_key = true;
+    renderAt("/settings/models");
+    fireEvent.change(await screen.findByLabelText(/^Base URL \(OpenRouter/), { target: { value: "https://qx13.invalid/v1" } });
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "qx13/typed-not-saved" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("The key works.")).toBeInTheDocument();
+    const order = invoke.mock.calls.map(([c]) => c).filter((c) => ["save_settings", "test_notes_key"].includes(c));
+    expect(order).toEqual(["save_settings", "test_notes_key"]);
+    expect(invoke).toHaveBeenCalledWith("save_settings", {
+      settings: { ...settings, notesBaseUrl: "https://qx13.invalid/v1", notesModel: "qx13/typed-not-saved" },
+    });
+  });
+
+  it("test_key_asks_for_a_key_when_none_is_saved", async () => {
+    responses.has_api_key = false;
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("Add and save the notes API key first.")).toBeInTheDocument();
+    expect(invoke.mock.calls.map(([c]) => c)).not.toContain("test_notes_key");
+  });
+
+  it("settings_saved_message_clears_after_an_edit", async () => {
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "provider/other" } });
+    expect(screen.queryByText("Settings saved.")).not.toBeInTheDocument();
+  });
+
   it("test_key_shows_ok_and_error_messages", async () => {
+    responses.has_api_key = true;
     responses.test_notes_key = undefined;
     renderAt("/settings/models");
     fireEvent.click(await screen.findByRole("button", { name: "Test key" }));

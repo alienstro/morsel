@@ -62,6 +62,7 @@ export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
   const model = useLocalModel();
   const notesModel = useNotesModel();
   const searchModel = useSearchModel();
@@ -75,7 +76,12 @@ export function SettingsModelsScreen() {
 
   if (!settings) return <p className="muted page">{message ?? "Loading the settings…"}</p>;
 
-  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setSettings({ ...settings, [key]: value });
+  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setSettings({ ...settings, [key]: value });
+    // An edit makes "Settings saved." and the last key test out of date (#29).
+    setMessage(null);
+    setKeyMessage(null);
+  };
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -89,11 +95,21 @@ export function SettingsModelsScreen() {
 
   const testKey = async () => {
     setKeyMessage(null);
+    setTesting(true);
     try {
+      if (!(await api.hasApiKey("notes_api_key"))) {
+        setKeyMessage("Add and save the notes API key first.");
+        return;
+      }
+      // The backend tests the saved settings, so save the form first, as onboarding does (#29).
+      await api.saveSettings(settings);
+      setMessage("Settings saved.");
       await api.testNotesKey();
       setKeyMessage("The key works.");
     } catch (e) {
       setKeyMessage(errorMessage(e));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -126,7 +142,7 @@ export function SettingsModelsScreen() {
             </div>
             <KeyField account="notes_api_key" label="Notes API key" />
             <div className="row">
-              <button type="button" className="btn" onClick={testKey}>Test key</button>
+              <button type="button" className="btn" onClick={testKey} disabled={testing}>Test key</button>
               {keyMessage && <span className="small">{keyMessage}</span>}
             </div>
           </>
