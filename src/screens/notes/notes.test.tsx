@@ -50,6 +50,17 @@ function renderNotes() {
 }
 
 describe("NotesScreen", () => {
+  it("notes_rows_show_a_sign_when_the_notes_failed_or_were_cancelled", async () => {
+    responses.search_notes = {
+      items: [meeting(1, "Failed one", { status: "notes_failed" }), meeting(2, "Cancelled one", { status: "notes_cancelled" }), meeting(3, "Done one")],
+      total: 3,
+    };
+    renderNotes();
+    expect(await screen.findByText("Notes failed")).toBeInTheDocument();
+    expect(screen.getByText("Notes cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Done one").closest("td")).toHaveTextContent(/^Done one$/);
+  });
+
   it("lists_notes_with_count", async () => {
     renderNotes();
     expect(await screen.findByText("Weekly product sync")).toBeInTheDocument();

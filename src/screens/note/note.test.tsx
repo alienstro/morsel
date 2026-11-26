@@ -80,6 +80,12 @@ describe("WritingScreen", () => {
     expect(invoke).toHaveBeenCalledWith("write_notes", { meetingId: 1, templateId: 5 });
   });
 
+  it("writing_page_shows_the_saved_reason_of_a_failed_meeting", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "notes_failed" }, lines: [], userNotes: "", note: null, notesError: "no notes model" };
+    renderAt("/meeting/1/writing");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Morsel could not write the notes: no notes model");
+  });
+
   it("notes_done_opens_the_note", async () => {
     responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "budget ok", note: "## Summary\nbudget ok" };
     renderAt("/meeting/1/writing");
@@ -141,6 +147,31 @@ describe("NoteScreen", () => {
     renderAt("/note/1");
     expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
+  });
+
+  it("note_page_shows_the_reason_when_the_notes_failed", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "notes_failed" }, lines: [], userNotes: "", note: null, notesError: "no notes model" };
+    renderAt("/note/1");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Morsel could not write the notes: no notes model");
+    expect(screen.queryByText("This meeting has no notes yet.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("write_notes", { meetingId: 1, templateId: 5 }));
+  });
+
+  it("note_page_says_the_user_cancelled_the_notes", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "notes_cancelled" }, lines: [], userNotes: "", note: null, notesError: null };
+    renderAt("/note/1");
+    expect(await screen.findByText("You cancelled the notes.")).toBeInTheDocument();
+    expect(screen.queryByText("This meeting has no notes yet.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Write notes" })).toBeInTheDocument();
+  });
+
+  it("note_page_with_notes_shows_no_failure_text", async () => {
+    responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary", notesError: "old error" };
+    renderAt("/note/1");
+    await screen.findByRole("button", { name: "Write again" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("You cancelled the notes.")).not.toBeInTheDocument();
   });
 
   it("note_page_has_no_audio_button_without_audio", async () => {

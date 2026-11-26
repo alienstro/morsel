@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { api, errorMessage, onCalendarChanged, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
+import { NotesSign } from "./notes/NotesScreen";
 import "./library.css";
 import "./note/note.css";
 
@@ -133,6 +134,7 @@ export function HomeScreen() {
                 <li key={m.id}>
                   <Link to={LIVE.includes(m.status) ? `/meeting/${m.id}` : `/note/${m.id}`} className="meeting-row">
                     <span className="truncate" style={{ flexGrow: 1, fontWeight: 500 }}>{m.title}</span>
+                    <NotesSign status={m.status} />
                     <span className="muted small">{m.templateName}</span>
                     <span className="muted small tabular" style={{ width: 40, textAlign: "right" }}>{clockTime(m.startedAt)}</span>
                   </Link>

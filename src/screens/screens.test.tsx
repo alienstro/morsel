@@ -57,6 +57,17 @@ describe("HomeScreen earlier notes", () => {
   });
 });
 
+describe("HomeScreen notes sign", () => {
+  it("home_rows_show_a_sign_when_the_notes_failed_or_were_cancelled", async () => {
+    const row = (id: number, title: string, status: string) => ({ id, title, templateId: 1, templateName: "General", status, startedAt: Date.now(), endedAt: null, people: [] });
+    responses.list_meetings = [row(1, "Failed one", "notes_failed"), row(2, "Cancelled one", "notes_cancelled"), row(3, "Done one", "done")];
+    renderAt("/");
+    expect(await screen.findByText("Notes failed")).toBeInTheDocument();
+    expect(screen.getByText("Notes cancelled")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Done one/ })).not.toHaveTextContent(/Notes (failed|cancelled)/);
+  });
+});
+
 describe("HomeScreen ask box", () => {
   it("home_cmd_k_focuses_ask_box", async () => {
     renderAt("/");

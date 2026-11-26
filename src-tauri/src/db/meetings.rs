@@ -29,6 +29,8 @@ pub struct MeetingDetail {
     pub lines: Vec<TranscriptLine>,
     pub user_notes: String,
     pub note: Option<String>,
+    /// The reason of the last notes failure, or `None` when the notes never failed.
+    pub notes_error: Option<String>,
 }
 
 /// The title of a meeting that the user did not name.
@@ -104,6 +106,15 @@ pub fn set_status(conn: &Connection, id: MeetingId, status: MeetingStatus) -> Re
         return Err(MorselError::NotFound(format!("meeting {id}")));
     }
     reindex_meeting(conn, id)
+}
+
+/// Saves the reason of a notes failure. The note page shows it while the status is `notes_failed`.
+pub fn set_notes_error(conn: &Connection, id: MeetingId, message: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings SET notes_error = ?1 WHERE id = ?2",
+        params![message, id],
+    )?;
+    Ok(())
 }
 
 /// Saves the people of a calendar meeting. Empty names are dropped.
@@ -261,12 +272,18 @@ pub fn get_meeting(conn: &Connection, id: MeetingId) -> Result<MeetingDetail> {
             |r| r.get(0),
         )
         .optional()?;
+    let notes_error = conn.query_row(
+        "SELECT notes_error FROM meetings WHERE id = ?1",
+        [id],
+        |r| r.get::<_, Option<String>>(0),
+    )?;
 
     Ok(MeetingDetail {
         summary,
         lines,
         user_notes,
         note,
+        notes_error,
     })
 }
 
