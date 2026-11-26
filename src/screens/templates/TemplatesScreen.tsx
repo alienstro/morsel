@@ -25,7 +25,7 @@ export function TemplatesScreen() {
   const [form, setForm] = useState<TemplateInput>(EMPTY);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"delete" | "reset" | null>(null);
 
   const current = templates.find((t) => t.id === selected) ?? null;
 
@@ -93,7 +93,7 @@ export function TemplatesScreen() {
 
   const remove = async () => {
     if (selected === null) return;
-    setConfirming(false);
+    setConfirming(null);
     setError(null);
     try {
       await api.deleteTemplate(selected);
@@ -166,18 +166,30 @@ export function TemplatesScreen() {
           <button type="submit" className="btn btn-primary">Save template</button>
           {current && <button type="button" className="btn" onClick={() => run(() => api.duplicateTemplate(current.id), "Copied.")}>Duplicate</button>}
           <span style={{ flexGrow: 1 }} />
-          {current?.builtIn && <button type="button" className="btn" onClick={() => run(() => api.resetTemplate(current.id), "Reset to the built-in values.")}>Reset</button>}
-          {current && !current.builtIn && <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Delete</button>}
+          {current?.builtIn && <button type="button" className="btn" onClick={() => setConfirming("reset")}>Reset</button>}
+          {current && !current.builtIn && <button type="button" className="btn btn-danger" onClick={() => setConfirming("delete")}>Delete</button>}
         </div>
       </form>
 
-      {confirming && current && (
+      {confirming === "reset" && current && (
+        <ConfirmDialog
+          title="Reset this template?"
+          body={`"${current.name}" goes back to its built-in sections and instructions. You cannot undo this.`}
+          confirmLabel="Reset template"
+          onConfirm={() => {
+            setConfirming(null);
+            void run(() => api.resetTemplate(current.id), "Reset to the built-in values.");
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming === "delete" && current && (
         <ConfirmDialog
           title="Delete this template?"
           body={`"${current.name}" goes away. Notes that use it move to General and keep their text.`}
           confirmLabel="Delete template"
           onConfirm={remove}
-          onCancel={() => setConfirming(false)}
+          onCancel={() => setConfirming(null)}
         />
       )}
     </div>
