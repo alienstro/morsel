@@ -1,6 +1,6 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { type ReactNode, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
 import { markYours, type NotePart } from "../../lib/markYours";
@@ -80,7 +80,9 @@ export function NoteScreen() {
     }
   };
 
-  if (!detail) return <p className="muted page">{info ?? "Loading the note…"}</p>;
+  if (!detail) {
+    return <p className="muted page">{info ?? "Loading the note…"}{info && <> <Link to="/notes">Back to Notes</Link></>}</p>;
+  }
 
   const note = detail.note;
   const copy = async () => {

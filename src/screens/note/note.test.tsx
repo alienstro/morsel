@@ -143,6 +143,15 @@ describe("NoteScreen", () => {
     expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
   });
 
+  it("deleted_note_says_so_and_links_back_to_notes", async () => {
+    responses.get_meeting = () => Promise.reject({ code: "not_found", message: "not found: meeting 1" });
+    renderAt("/note/1");
+    expect(await screen.findByText("This note was deleted.")).toBeInTheDocument();
+    expect(screen.queryByText(/not found/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Back to Notes" }));
+    expect(await screen.findByText("notes page")).toBeInTheDocument();
+  });
+
   it("note_page_has_no_audio_button_without_audio", async () => {
     responses.get_meeting = { summary: { ...summary, status: "done" }, lines: [], userNotes: "", note: "## Summary" };
     responses.audio_size = null;

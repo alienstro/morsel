@@ -32,7 +32,7 @@ describe("ReminderApp", () => {
     responses.start_from_reminder = () => Promise.reject({ code: "already_recording", message: "a meeting is already recording" });
     render(<ReminderApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
-    expect(await screen.findByText("a meeting is already recording")).toBeInTheDocument();
+    expect(await screen.findByText("A meeting is already recording. Stop it first.")).toBeInTheDocument();
   });
 
   it("dismiss_closes_the_reminder", async () => {
