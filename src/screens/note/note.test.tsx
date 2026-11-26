@@ -18,6 +18,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/meeting/:id/writing" element={<WritingScreen />} />
         <Route path="/note/:id" element={<NoteScreen />} />
+        <Route path="/meeting/:id" element={<p>meeting screen</p>} />
         <Route path="/notes" element={<p>notes page</p>} />
       </Routes>
     </MemoryRouter>,
@@ -140,6 +141,13 @@ describe("NoteScreen", () => {
     responses.get_meeting = { summary: { ...summary, status: "transcribing" }, lines: [], userNotes: "", note: null };
     renderAt("/note/1");
     expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
+  });
+
+  it.each(["recording", "paused"])("note_page_opens_the_meeting_screen_while_%s", async (status) => {
+    responses.get_meeting = { summary: { ...summary, status }, lines: [], userNotes: "", note: null };
+    renderAt("/note/1");
+    expect(await screen.findByText("meeting screen")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
   });
 

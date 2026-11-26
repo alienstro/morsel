@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
 import { markYours, type NotePart } from "../../lib/markYours";
+import { LIVE } from "../notes/NotesScreen";
 import "./note.css";
 
 const HEADING = /^#{1,3}\s+(.*)$/;
@@ -56,10 +57,17 @@ export function NoteScreen() {
   const [confirmingAudio, setConfirmingAudio] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     api.getMeeting(id).then((d) => {
+      if (!alive) return;
       // The after job still transcribes this meeting: the writing page shows its progress.
       if (d.summary.status === "transcribing") {
         navigate(`/meeting/${id}/writing`, { replace: true });
+        return;
+      }
+      // A live meeting has no notes yet: the meeting screen stops it first (#18).
+      if (LIVE.includes(d.summary.status)) {
+        navigate(`/meeting/${id}`, { replace: true });
         return;
       }
       setDetail(d);
@@ -67,6 +75,9 @@ export function NoteScreen() {
     }).catch((e) => setInfo(errorMessage(e)));
     api.listTemplates().then(setTemplates).catch(() => {});
     api.audioSize(id).then(setAudioBytes).catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [id, navigate]);
 
   const deleteAudio = async () => {
