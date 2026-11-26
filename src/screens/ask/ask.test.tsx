@@ -82,5 +82,59 @@ describe("AskScreen", () => {
     fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "anything" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("add the notes API key in Settings first");
+    expect(screen.getByText("anything", { selector: ".question-bubble" })).toBeInTheDocument();
+  });
+
+  it("failed_question_replaces_previous_answer_and_tries_again", async () => {
+    renderAt("/ask");
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText("Acme thinks the price is fair for the first year.")).toBeInTheDocument();
+
+    responses.ask = () => Promise.reject({ code: "network", message: "network or provider error: timeout" });
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "Who owns the rollout?" } });
+    fireEvent.change(screen.getByLabelText("Time range"), { target: { value: "month" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("network or provider error: timeout");
+    expect(screen.getByText("Who owns the rollout?", { selector: ".question-bubble" })).toBeInTheDocument();
+    expect(screen.queryByText("Acme thinks the price is fair for the first year.")).not.toBeInTheDocument();
+
+    responses.ask = { ...answer, id: 7, question: "Who owns the rollout?", answer: "Priya owns the rollout." };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Priya owns the rollout.")).toBeInTheDocument();
+    expect(askCalls()[askCalls().length - 1]).toEqual({ question: "Who owns the rollout?", range: "month", meetingId: null });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("earlier_question_after_failure_shows_its_answer", async () => {
+    renderAt("/ask");
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText("Acme thinks the price is fair for the first year.")).toBeInTheDocument();
+
+    responses.ask = () => Promise.reject({ code: "network", message: "network or provider error: timeout" });
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "Who owns the rollout?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "What did Acme say about the price?" }));
+    expect(await screen.findByText("Acme thinks the price is fair for the first year.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("new_question_after_failure_clears_error", async () => {
+    responses.ask = () => Promise.reject({ code: "network", message: "network or provider error: timeout" });
+    renderAt("/ask");
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "first?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    responses.ask = answer;
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText("Acme thinks the price is fair for the first year.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("first?")).not.toBeInTheDocument();
   });
 });

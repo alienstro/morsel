@@ -19,12 +19,14 @@ export function AskScreen() {
   const [pending, setPending] = useState<string | null>(null);
   const [earlier, setEarlier] = useState<AskAnswer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ question: string; range: AskRange } | null>(null);
   const askedFromUrl = useRef(false);
 
   const send = async (text: string, scope: AskRange) => {
     const q = text.trim();
     if (!q) return;
     setError(null);
+    setFailed(null);
     setPending(q);
     try {
       const result = await api.ask(q, scope, null);
@@ -36,6 +38,7 @@ export function AskScreen() {
       }
     } catch (e) {
       setError(errorMessage(e));
+      setFailed({ question: q, range: scope });
     } finally {
       setPending(null);
     }
@@ -55,6 +58,8 @@ export function AskScreen() {
   }, [search]);
 
   useEffect(() => {
+    setError(null);
+    setFailed(null);
     if (savedId === null || answer?.id === savedId) return;
     api.getAsk(savedId).then(setAnswer).catch((e) => setError(errorMessage(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,7 +70,7 @@ export function AskScreen() {
     void send(question, range);
   };
 
-  const shown = pending ?? answer?.question ?? null;
+  const shown = pending ?? failed?.question ?? answer?.question ?? null;
 
   return (
     <div className="ask-layout">
@@ -73,7 +78,7 @@ export function AskScreen() {
         <nav aria-label="Earlier questions" className="ask-history">
           <div className="nav-label">Earlier questions</div>
           {earlier.map((a) => (
-            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId ? "page" : undefined} title={a.question}>{a.question}</Link>
+            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId && !failed ? "page" : undefined} title={a.question} onClick={() => { setError(null); setFailed(null); }}>{a.question}</Link>
           ))}
         </nav>
       )}
@@ -83,7 +88,7 @@ export function AskScreen() {
           {!shown && <p className="muted">Ask a question about your meetings. Morsel answers from your notes and transcripts, and shows where each answer comes from.</p>}
           {shown && <div className="question-bubble">{shown}</div>}
           {pending && <p role="status" className="muted">Reading your meetings…</p>}
-          {!pending && answer && (
+          {!pending && !failed && answer && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <AnswerText text={answer.answer} className="answer-text" />
               {answer.sources.length > 0 && (
@@ -102,6 +107,7 @@ export function AskScreen() {
             </div>
           )}
           {error && <p role="alert" className="error-text">{error}</p>}
+          {failed && <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={() => void send(failed.question, failed.range)}>Try again</button>}
         </div>
         <form className="ask-form" onSubmit={submit}>
           <label htmlFor="ask-q" className="sr-only">Ask about your meetings</label>
