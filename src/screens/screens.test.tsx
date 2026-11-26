@@ -107,7 +107,8 @@ describe("SettingsModelsScreen", () => {
     fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "qx13/typed-not-saved" } });
     fireEvent.click(screen.getByRole("button", { name: "Test key" }));
     expect(await screen.findByText("The key works.")).toBeInTheDocument();
-    const order = invoke.mock.calls.map(([c]) => c).filter((c) => ["save_settings", "test_notes_key"].includes(c));
+    expect(screen.getByText("Settings saved.")).toBeInTheDocument();
+    const order =invoke.mock.calls.map(([c]) => c).filter((c) => ["save_settings", "test_notes_key"].includes(c));
     expect(order).toEqual(["save_settings", "test_notes_key"]);
     expect(invoke).toHaveBeenCalledWith("save_settings", {
       settings: { ...settings, notesBaseUrl: "https://qx13.invalid/v1", notesModel: "qx13/typed-not-saved" },
@@ -120,6 +121,23 @@ describe("SettingsModelsScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
     expect(await screen.findByText("Add and save the notes API key first.")).toBeInTheDocument();
     expect(invoke.mock.calls.map(([c]) => c)).not.toContain("test_notes_key");
+  });
+
+  it("test_key_button_is_disabled_while_a_test_runs", async () => {
+    responses.has_api_key = true;
+    responses.test_notes_key = () => new Promise(() => {});
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test key" })).toBeDisabled());
+  });
+
+  it("key_result_clears_after_an_edit", async () => {
+    responses.has_api_key = true;
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("The key works.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "provider/other" } });
+    expect(screen.queryByText("The key works.")).not.toBeInTheDocument();
   });
 
   it("settings_saved_message_clears_after_an_edit", async () => {
