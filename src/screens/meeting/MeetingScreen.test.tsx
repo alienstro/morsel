@@ -3,6 +3,8 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
 import { MeetingScreen } from "./MeetingScreen";
+// #32: loaded after meeting.css, so the test proves the fix does not depend on the CSS order.
+import "../../styles/tokens.css";
 
 vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test/tauri")).invoke }));
 vi.mock("@tauri-apps/api/event", async () => ({ listen: (await import("../../test/tauri")).listen }));
@@ -42,6 +44,13 @@ afterEach(() => {
 });
 
 describe("MeetingScreen", () => {
+  it("brand_link_does_not_fill_the_sidebar_height", async () => {
+    await renderScreen();
+    const brand = getComputedStyle(screen.getByRole("link", { name: "Morsel" }));
+    expect(brand.flexGrow).toBe("0");
+    expect(brand.alignSelf).toBe("flex-start");
+  });
+
   it("new_transcript_event_adds_a_line_with_speaker_label", async () => {
     await renderScreen();
     act(() => emit("meeting://transcript", { meetingId: 1, speaker: "others", startMs: 62_000, endMs: 70_000, text: "Probably one week late." }));
