@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetModelDownloads } from "../../lib/localModel";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
+import { SettingsModelsScreen } from "../SettingsModelsScreen";
 import { OnboardingScreen } from "./OnboardingScreen";
 
 vi.mock("@tauri-apps/api/core", async () => ({ invoke: (await import("../../test/tauri")).invoke }));
@@ -19,12 +21,21 @@ function calls(cmd: string) {
 
 beforeEach(() => {
   resetTauri();
+  resetModelDownloads();
   responses.get_settings = settings;
   responses.microphone_access = "unknown";
   responses.request_microphone = "allowed";
   responses.model_status = false;
   responses.has_api_key = false;
 });
+
+/** Leaves the AI step with Back and comes back with Continue. */
+async function backAndContinue() {
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByText("Allowed");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByText("Step 2 of 3");
+}
 
 function renderAt(path: string) {
   render(
@@ -151,6 +162,69 @@ describe("AI step", () => {
     await waitFor(() => expect(calls("download_search_model")).toHaveLength(1));
     act(() => emit("search-model://download", { received: 155 * 1_000_000, total: 310 * 1_000_000 }));
     expect(await screen.findByText("Search model: downloading, 155 of 310 MB")).toBeInTheDocument();
+  });
+
+  it("ai_step_keeps_the_download_after_back_and_continue", async () => {
+    let finish = () => {};
+    responses.microphone_access = "allowed";
+    responses.download_model = () => new Promise<void>((resolve) => (finish = resolve));
+    renderAt("/welcome/2");
+    fireEvent.click(await screen.findByRole("button", { name: "Download the model" }));
+    act(() => emit("model://download", { received: 200 * 1_000_000, total: 1000 * 1_000_000 }));
+    expect(await screen.findByText("Downloading, 200 of 1000 MB")).toBeInTheDocument();
+    await backAndContinue();
+    expect(await screen.findByText("Downloading, 200 of 1000 MB")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download the model" })).toBeNull();
+    await act(async () => finish());
+    expect(await screen.findByText("Ready")).toBeInTheDocument();
+    expect(calls("download_model")).toHaveLength(1);
+  });
+
+  it("ai_step_shows_a_download_error_after_coming_back", async () => {
+    let fail = (_: unknown) => {};
+    responses.microphone_access = "allowed";
+    responses.download_model = () => new Promise<void>((_, reject) => (fail = reject));
+    renderAt("/welcome/2");
+    fireEvent.click(await screen.findByRole("button", { name: "Download the model" }));
+    await waitFor(() => expect(calls("download_model")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Allowed");
+    await act(async () => fail({ code: "network", message: "no network" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no network");
+  });
+
+  it("ai_step_keeps_both_local_downloads_after_back_and_continue", async () => {
+    let finishNotes = () => {};
+    responses.microphone_access = "allowed";
+    responses.download_notes_model = () => new Promise<void>((resolve) => (finishNotes = resolve));
+    responses.download_search_model = () => new Promise(() => {});
+    renderAt("/welcome/2");
+    fireEvent.click(await screen.findByRole("button", { name: "Download the models (3.27 GB)" }));
+    act(() => emit("notes-model://download", { received: 740 * 1_000_000, total: 2960 * 1_000_000 }));
+    await backAndContinue();
+    expect(await screen.findByText("Downloading, 740 of 2960 MB")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Allowed");
+    responses.notes_model_status = true;
+    await act(async () => finishNotes());
+    await waitFor(() => expect(calls("download_search_model")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText("Step 2 of 3");
+    act(() => emit("search-model://download", { received: 155 * 1_000_000, total: 310 * 1_000_000 }));
+    expect(await screen.findByText("Search model: downloading, 155 of 310 MB")).toBeInTheDocument();
+    expect(calls("download_notes_model")).toHaveLength(1);
+  });
+
+  it("settings_shows_the_download_that_onboarding_started", async () => {
+    responses.download_model = () => new Promise(() => {});
+    renderAt("/welcome/2");
+    fireEvent.click(await screen.findByRole("button", { name: "Download the model" }));
+    act(() => emit("model://download", { received: 200 * 1_000_000, total: 1000 * 1_000_000 }));
+    cleanup();
+    render(<MemoryRouter><SettingsModelsScreen /></MemoryRouter>);
+    expect(await screen.findByText("Downloading: 20%")).toBeInTheDocument();
+    expect(calls("download_model")).toHaveLength(1);
   });
 
   it("ai_step_back_goes_to_step_1", async () => {

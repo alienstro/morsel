@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetModelDownloads } from "../lib/localModel";
 import { emit, invoke, resetTauri, responses } from "../test/tauri";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModelsScreen } from "./SettingsModelsScreen";
@@ -15,6 +16,7 @@ const settings = {
 
 beforeEach(() => {
   resetTauri();
+  resetModelDownloads();
   responses.list_templates = [{ id: 1, name: "General", sections: [], instructions: "" }, { id: 3, name: "Sales call", sections: [], instructions: "" }];
   responses.list_meetings = [{ id: 9, title: "Acme discovery call", templateId: 3, templateName: "Sales call", status: "done", startedAt: 0 }];
   responses.get_settings = settings;
@@ -160,6 +162,21 @@ describe("SettingsModelsScreen", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("download_notes_model"));
     act(() => emit("notes-model://download", { received: 740_000_000, total: 2_960_000_000 }));
     expect(await screen.findByText("Downloading: 25%")).toBeInTheDocument();
+  });
+
+  it("settings_keeps_the_notes_download_after_a_screen_change", async () => {
+    responses.get_settings = { ...settings, notesMode: "local" };
+    responses.notes_model_status = false;
+    responses.download_notes_model = () => new Promise(() => {});
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Download the notes model" }));
+    act(() => emit("notes-model://download", { received: 740_000_000, total: 2_960_000_000 }));
+    expect(await screen.findByText("Downloading: 25%")).toBeInTheDocument();
+    cleanup();
+    renderAt("/settings/models");
+    expect(await screen.findByText("Downloading: 25%")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download the notes model" })).toBeNull();
+    expect(invoke.mock.calls.filter(([c]) => c === "download_notes_model")).toHaveLength(1);
   });
 
   it("settings_shows_the_search_model_and_its_download", async () => {
