@@ -1,4 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { ConfirmDialog } from "../app/ConfirmDialog";
+import { useLeaveGuard } from "../app/useLeaveGuard";
 import { api, errorMessage, type KeyAccount, type Settings, type UsageTotal } from "../lib/api";
 import {
   LOCAL_MODEL,
@@ -60,6 +62,7 @@ function usageText(u: UsageTotal): string {
 
 export function SettingsModelsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [saved, setSaved] = useState<Settings | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
   const model = useLocalModel();
@@ -70,8 +73,14 @@ export function SettingsModelsScreen() {
 
   useEffect(() => {
     api.usageSummary().then(setUsage).catch(() => {});
-    api.getSettings().then(setSettings).catch((e) => setMessage(errorMessage(e)));
+    api.getSettings().then((s) => {
+      setSettings(s);
+      setSaved(s);
+    }).catch((e) => setMessage(errorMessage(e)));
   }, []);
+
+  const dirty = JSON.stringify(settings) !== JSON.stringify(saved);
+  const { leaveTo, leave, stay } = useLeaveGuard(dirty);
 
   if (!settings) return <p className="muted page">{message ?? "Loading the settings…"}</p>;
 
@@ -81,6 +90,7 @@ export function SettingsModelsScreen() {
     e.preventDefault();
     try {
       await api.saveSettings(settings);
+      setSaved(settings);
       setMessage("Settings saved.");
     } catch (err) {
       setMessage(errorMessage(err));
@@ -177,6 +187,15 @@ export function SettingsModelsScreen() {
         <button type="submit" className="btn btn-primary">Save settings</button>
         {message && <span role="status" className="small">{message}</span>}
       </div>
+      {leaveTo && (
+        <ConfirmDialog
+          title="Discard your changes?"
+          body="Your settings are not saved."
+          confirmLabel="Discard changes"
+          onConfirm={leave}
+          onCancel={stay}
+        />
+      )}
     </form>
   );
 }
