@@ -245,3 +245,56 @@ describe("HomeScreen next meeting", () => {
     expect(screen.getByPlaceholderText("Meeting title (optional)")).toBeInTheDocument();
   });
 });
+
+describe("HomeScreen live meeting", () => {
+  const live = (status: string) => ({ id: 7, title: "Acme sync", templateId: 1, templateName: "General", status, startedAt: Date.now(), endedAt: null, people: [] });
+
+  it("home_shows_the_recording_meeting_instead_of_start", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(screen.queryByRole("button", { name: /Start notes/ })).not.toBeInTheDocument();
+    expect(await screen.findByText("Recording: Acme sync")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Start notes/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Open the meeting" }));
+    expect(await screen.findByText("meeting page")).toBeInTheDocument();
+  });
+
+  it("home_shows_a_paused_meeting", async () => {
+    responses.list_meetings = [live("paused")];
+    renderAt("/");
+    expect(await screen.findByText("Paused: Acme sync")).toBeInTheDocument();
+  });
+
+  it("home_shows_the_start_card_after_stop", async () => {
+    responses.list_meetings = [live("stopped")];
+    renderAt("/");
+    await screen.findByRole("link", { name: /Acme sync/ });
+    expect(screen.getByRole("button", { name: /Start notes/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Recording: /)).not.toBeInTheDocument();
+  });
+
+  it("home_reloads_when_the_meeting_status_changes", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    await screen.findByText("Recording: Acme sync");
+    responses.list_meetings = [live("stopped")];
+    await act(async () => emit("meeting://status", { meetingId: 7, status: "stopped" }));
+    expect(await screen.findByRole("button", { name: /Start notes/ })).toBeInTheDocument();
+  });
+
+  it("home_shows_the_recording_before_the_calendar_meeting", async () => {
+    responses.upcoming_events = [{ id: "e1", provider: "google", title: "Weekly product sync", start: Date.now() + 300_000, end: Date.now() + 1_800_000, link: null, people: [] }];
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(await screen.findByText("Recording: Acme sync")).toBeInTheDocument();
+    await act(async () => {});
+    expect(screen.queryByText("Weekly product sync")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start a note without the calendar" })).not.toBeInTheDocument();
+  });
+
+  it("earlier_notes_marks_the_recording_meeting", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(await screen.findByRole("link", { name: /Acme sync.*Recording/ })).toHaveAttribute("href", "/meeting/7");
+  });
+});

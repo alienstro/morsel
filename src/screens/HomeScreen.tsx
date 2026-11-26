@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { api, errorMessage, onCalendarChanged, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
+import { api, errorMessage, onCalendarChanged, onStatus, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
 import "./library.css";
@@ -25,6 +25,7 @@ export function HomeScreen() {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [templateId, setTemplateId] = useState(1);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -68,10 +69,18 @@ export function HomeScreen() {
 
   useEffect(() => {
     api.listTemplates().then(setTemplates).catch((e) => setError(errorMessage(e)));
-    api.listMeetings(8).then(setMeetings).catch(() => {});
+    // Hide the start card until the list shows if a meeting records, and reload on status (#25).
+    const load = () => api.listMeetings(8).then(setMeetings).catch(() => {}).finally(() => setLoaded(true));
+    load();
+    const off = onStatus(load);
+    return () => {
+      off.then((f) => f());
+    };
   }, []);
 
   const event = unscheduled ? null : next;
+  // One meeting records at a time and the list is newest first, so it holds the live one (#25).
+  const live = meetings.find((m) => LIVE.includes(m.status));
 
   const start = async () => {
     setError(null);
@@ -90,33 +99,46 @@ export function HomeScreen() {
   return (
     <div className="page">
       <h1 className="serif page-title">Good to see you.</h1>
-      <section aria-labelledby="start" className="start-card">
-        <h2 id="start" className="sr-only">{event ? "Next meeting" : "Start a meeting"}</h2>
-        {event ? (
-          <>
-            <span className="tabular next-time">{clockTime(event.start)}</span>
-            <div className="next-text">
-              <div className="truncate next-title">{event.title}</div>
-              <div className="truncate muted small">{eventLine(event, now)}</div>
-            </div>
-          </>
-        ) : (
-          <>
-            <label htmlFor="title" className="sr-only">Meeting title</label>
-            <input id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </>
-        )}
-        <label htmlFor="template" className="sr-only">Template</label>
-        <select id="template" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
-          {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        <button type="button" className="btn btn-primary" onClick={start} disabled={starting}>
-          <span aria-hidden="true" className="dot" />
-          Start notes
-        </button>
-      </section>
-      {event && (
-        <button type="button" className="btn btn-link next-skip" onClick={() => setUnscheduled(true)}>Start a note without the calendar</button>
+      {live ? (
+        <section aria-labelledby="start" className="start-card">
+          <h2 id="start" className="sr-only">Meeting in progress</h2>
+          <span aria-hidden="true" className="rec-dot" />
+          <div className="next-text">
+            <div className="truncate next-title">{live.status === "paused" ? "Paused" : "Recording"}: {live.title}</div>
+          </div>
+          <Link to={`/meeting/${live.id}`} className="btn">Open the meeting</Link>
+        </section>
+      ) : loaded && (
+        <>
+          <section aria-labelledby="start" className="start-card">
+            <h2 id="start" className="sr-only">{event ? "Next meeting" : "Start a meeting"}</h2>
+            {event ? (
+              <>
+                <span className="tabular next-time">{clockTime(event.start)}</span>
+                <div className="next-text">
+                  <div className="truncate next-title">{event.title}</div>
+                  <div className="truncate muted small">{eventLine(event, now)}</div>
+                </div>
+              </>
+            ) : (
+              <>
+                <label htmlFor="title" className="sr-only">Meeting title</label>
+                <input id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </>
+            )}
+            <label htmlFor="template" className="sr-only">Template</label>
+            <select id="template" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button type="button" className="btn btn-primary" onClick={start} disabled={starting}>
+              <span aria-hidden="true" className="dot" />
+              Start notes
+            </button>
+          </section>
+          {event && (
+            <button type="button" className="btn btn-link next-skip" onClick={() => setUnscheduled(true)}>Start a note without the calendar</button>
+          )}
+        </>
       )}
       {error && <p role="alert" className="error-text">{error}</p>}
       <section aria-labelledby="earlier">
@@ -133,6 +155,12 @@ export function HomeScreen() {
                 <li key={m.id}>
                   <Link to={LIVE.includes(m.status) ? `/meeting/${m.id}` : `/note/${m.id}`} className="meeting-row">
                     <span className="truncate" style={{ flexGrow: 1, fontWeight: 500 }}>{m.title}</span>
+                    {LIVE.includes(m.status) && (
+                      <span className="small rec-text">
+                        <span aria-hidden="true" className="rec-dot" />
+                        {m.status === "paused" ? "Paused" : "Recording"}
+                      </span>
+                    )}
                     <span className="muted small">{m.templateName}</span>
                     <span className="muted small tabular" style={{ width: 40, textAlign: "right" }}>{clockTime(m.startedAt)}</span>
                   </Link>
