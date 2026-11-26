@@ -40,4 +40,15 @@ describe("ReminderApp", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(invoke.mock.calls.some(([c]) => c === "dismiss_reminder")).toBe(true));
   });
+
+  it("reminder_css_does_not_style_the_main_window", () => {
+    // main.tsx always imports ReminderApp, so its page rules also reach the main window (#16).
+    expect(getComputedStyle(document.body).overflow).not.toBe("hidden");
+    document.documentElement.dataset.window = "reminder";
+    try {
+      expect(getComputedStyle(document.body).overflow).toBe("hidden");
+    } finally {
+      delete document.documentElement.dataset.window;
+    }
+  });
 });
