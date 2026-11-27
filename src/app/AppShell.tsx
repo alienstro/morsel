@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 
-export type RecentItem = { id: number; title: string };
+export type RecentItem = { id: number; title: string; path: string };
 
 type Props = {
   recent?: RecentItem[];
@@ -51,7 +51,7 @@ export function AppShell({ recent = [], noteCount, onNewNote, children }: Props)
             <div className="nav-group">
               <div className="nav-label">Recent</div>
               {recent.map((item) => (
-                <NavLink key={item.id} to={`/note/${item.id}`} className="nav-link">
+                <NavLink key={item.id} to={item.path} className="nav-link">
                   <span className="truncate">{item.title}</span>
                 </NavLink>
               ))}

@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <AppShell recent={[{ id: 7, title: "1:1 with Sam" }]}>
+      <AppShell recent={[{ id: 7, title: "1:1 with Sam", path: "/note/7" }]}>
         <p>content</p>
       </AppShell>
     </MemoryRouter>,

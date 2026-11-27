@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
+import { useLeaveGuard } from "../../app/useLeaveGuard";
 import { api, errorMessage, type Section, type Template, type TemplateInput } from "../../lib/api";
+import { joinNames } from "../../lib/calendar";
 import "../library.css";
 
 const GENERAL_ID = 1;
@@ -11,6 +13,9 @@ function usageLabel(t: Template): string {
   if (t.uses === 0) return "Not used yet";
   return t.uses === 1 ? "Used 1 time" : `Used ${t.uses} times`;
 }
+
+// The backend drops a section with no name, so a hint alone would go away with no message (#35).
+const nameless = (s: Section) => !s.name.trim() && !!s.hint.trim();
 
 function toInput(t: Template): TemplateInput {
   return { name: t.name, description: t.description, sections: t.sections.map((s) => ({ ...s })), instructions: t.instructions };
@@ -25,9 +30,19 @@ export function TemplatesScreen() {
   const [form, setForm] = useState<TemplateInput>(EMPTY);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"delete" | "reset" | null>(null);
+  const [pending, setPending] = useState<(() => void) | null>(null);
+  // True after a save that found a section with a hint but no name: marks those rows (#35).
+  const [checkNames, setCheckNames] = useState(false);
 
   const current = templates.find((t) => t.id === selected) ?? null;
+  const dirty = JSON.stringify(form) !== JSON.stringify(current ? toInput(current) : EMPTY);
+  // Ask before an action or a link replaces the form and drops edits that are not saved (#22).
+  const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
+  const { leaveTo, leave, stay } = useLeaveGuard(dirty);
+  const namelessRows = checkNames ? form.sections.flatMap((s, i) => (nameless(s) ? [String(i + 1)] : [])) : [];
+  // The message follows the rows, so it goes away when the user types the last name (#35).
+  const alertText = error ?? (namelessRows.length === 0 ? null : `Give ${namelessRows.length === 1 ? "section" : "sections"} ${joinNames(namelessRows)} a name.`);
 
   const load = async (select?: number | null) => {
     try {
@@ -53,6 +68,7 @@ export function TemplatesScreen() {
     setForm(toInput(t));
     setInfo(null);
     setError(null);
+    setCheckNames(false);
   };
 
   const startNew = () => {
@@ -60,6 +76,7 @@ export function TemplatesScreen() {
     setForm({ ...EMPTY, sections: [{ name: "", hint: "" }] });
     setInfo(null);
     setError(null);
+    setCheckNames(false);
   };
 
   const setSection = (i: number, patch: Partial<Section>) =>
@@ -88,12 +105,26 @@ export function TemplatesScreen() {
 
   const save = (e: FormEvent) => {
     e.preventDefault();
+    const first = form.sections.findIndex(nameless);
+    // Check the template name first, in the same order as the backend (#35).
+    const problem = !form.name.trim()
+      ? "Give the template a name."
+      : first >= 0 || form.sections.some((s) => s.name.trim())
+        ? null
+        : "Add at least one section.";
+    setCheckNames(first >= 0);
+    if (problem || first >= 0) {
+      setInfo(null);
+      setError(problem);
+      if (!problem) e.currentTarget.querySelectorAll<HTMLInputElement>(".section-row input:first-child")[first]?.focus();
+      return;
+    }
     void run(() => api.saveTemplate(selected, form), "Saved.");
   };
 
   const remove = async () => {
     if (selected === null) return;
-    setConfirming(false);
+    setConfirming(null);
     setError(null);
     try {
       await api.deleteTemplate(selected);
@@ -109,13 +140,13 @@ export function TemplatesScreen() {
       <section aria-labelledby="tpl-title" className="tpl-list">
         <div className="tpl-list-head">
           <h1 id="tpl-title">Templates</h1>
-          <button type="button" className="icon-btn-light" aria-label="New template" onClick={startNew}>
+          <button type="button" className="icon-btn-light" aria-label="New template" onClick={() => guard(startNew)}>
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" {...stroke}><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {templates.map((t) => (
-            <button key={t.id} type="button" className="tpl-item" aria-current={t.id === selected ? "true" : undefined} onClick={() => choose(t)}>
+            <button key={t.id} type="button" className="tpl-item" aria-current={t.id === selected ? "true" : undefined} onClick={() => guard(() => choose(t))}>
               <span className="name">{t.name}</span>
               <span className="muted small">{usageLabel(t)}</span>
             </button>
@@ -135,7 +166,7 @@ export function TemplatesScreen() {
           <legend>Sections</legend>
           {form.sections.map((s, i) => (
             <div key={i} className="section-row">
-              <input aria-label={`Section ${i + 1} name`} className="tpl-input" placeholder="Section name" value={s.name} onChange={(e) => setSection(i, { name: e.target.value })} />
+              <input aria-label={`Section ${i + 1} name`} aria-invalid={checkNames && nameless(s)} aria-describedby={checkNames && nameless(s) ? "tpl-error" : undefined} className="tpl-input" placeholder="Section name" value={s.name} onChange={(e) => setSection(i, { name: e.target.value })} />
               <input aria-label={`Section ${i + 1} hint`} className="tpl-input" placeholder="What it holds (optional)" value={s.hint} onChange={(e) => setSection(i, { hint: e.target.value })} />
               <button type="button" className="icon-btn-light" aria-label={`Move ${s.name || `section ${i + 1}`} up`} disabled={i === 0} onClick={() => moveSection(i, -1)}>
                 <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" {...stroke}><path d="M6 15l6-6 6 6" /></svg>
@@ -159,25 +190,53 @@ export function TemplatesScreen() {
           <textarea id="tpl-ai" rows={4} className="tpl-textarea" value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} />
         </div>
 
-        {error && <p role="alert" className="error-text">{error}</p>}
+        {alertText && <p id="tpl-error" role="alert" className="error-text">{alertText}</p>}
         {info && <p role="status" className="muted small">{info}</p>}
 
         <div className="row">
           <button type="submit" className="btn btn-primary">Save template</button>
-          {current && <button type="button" className="btn" onClick={() => run(() => api.duplicateTemplate(current.id), "Copied.")}>Duplicate</button>}
+          {current && <button type="button" className="btn" onClick={() => guard(() => void run(() => api.duplicateTemplate(current.id), "Copied."))}>Duplicate</button>}
           <span style={{ flexGrow: 1 }} />
-          {current?.builtIn && <button type="button" className="btn" onClick={() => run(() => api.resetTemplate(current.id), "Reset to the built-in values.")}>Reset</button>}
-          {current && !current.builtIn && <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Delete</button>}
+          {current?.builtIn && <button type="button" className="btn" onClick={() => setConfirming("reset")}>Reset</button>}
+          {current && !current.builtIn && <button type="button" className="btn btn-danger" onClick={() => setConfirming("delete")}>Delete</button>}
         </div>
       </form>
 
-      {confirming && current && (
+      {confirming === "reset" && current && (
+        <ConfirmDialog
+          title="Reset this template?"
+          body={`"${current.name}" goes back to its built-in sections and instructions. You cannot undo this.`}
+          confirmLabel="Reset template"
+          onConfirm={() => {
+            setConfirming(null);
+            void run(() => api.resetTemplate(current.id), "Reset to the built-in values.");
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming === "delete" && current && (
         <ConfirmDialog
           title="Delete this template?"
           body={`"${current.name}" goes away. Notes that use it move to General and keep their text.`}
           confirmLabel="Delete template"
           onConfirm={remove}
-          onCancel={() => setConfirming(false)}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {(pending || leaveTo) && (
+        <ConfirmDialog
+          title="Discard your changes?"
+          body="Your edits to this template are not saved."
+          confirmLabel="Discard changes"
+          onConfirm={() => {
+            setPending(null);
+            if (pending) pending();
+            else leave();
+          }}
+          onCancel={() => {
+            setPending(null);
+            stay();
+          }}
         />
       )}
     </div>

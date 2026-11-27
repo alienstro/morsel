@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { api, errorMessage, type AskAnswer, type AskRange } from "../../lib/api";
+import { api, errorMessage, needsSettings, type AskAnswer, type AskRange } from "../../lib/api";
 import { dayMonth } from "../../lib/dates";
 import "../library.css";
 import { AnswerText } from "./AnswerText";
@@ -19,26 +19,49 @@ export function AskScreen() {
   const [pending, setPending] = useState<string | null>(null);
   const [earlier, setEarlier] = useState<AskAnswer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ question: string; range: AskRange } | null>(null);
   const askedFromUrl = useRef(false);
+  const input = useRef<HTMLInputElement>(null);
+  // A new question bumps this, so an older answer that arrives late goes only to the history.
+  const turn = useRef(0);
 
   const send = async (text: string, scope: AskRange) => {
     const q = text.trim();
     if (!q) return;
     setError(null);
+    setFailed(null);
     setPending(q);
+    const mine = ++turn.current;
     try {
       const result = await api.ask(q, scope, null);
+      if (result.id !== null) setEarlier((prev) => [result, ...prev.filter((a) => a.id !== result.id)].slice(0, HISTORY));
+      if (mine !== turn.current) return;
       setAnswer(result);
       setQuestion("");
-      if (result.id !== null) {
-        setEarlier((prev) => [result, ...prev.filter((a) => a.id !== result.id)].slice(0, HISTORY));
-        navigate(`/ask/${result.id}`, { replace: true });
-      }
+      if (result.id !== null) navigate(`/ask/${result.id}`, { replace: true });
     } catch (e) {
-      setError(errorMessage(e));
+      if (mine === turn.current) {
+        setError(errorMessage(e));
+        setFailed({ question: q, range: scope });
+      }
     } finally {
-      setPending(null);
+      if (mine === turn.current) setPending(null);
     }
+  };
+
+  const clear = () => {
+    turn.current++;
+    setAnswer(null);
+    setPending(null);
+    setQuestion("");
+    setError(null);
+    setFailed(null);
+  };
+
+  const newQuestion = () => {
+    clear();
+    if (savedId !== null) navigate("/ask");
+    input.current?.focus();
   };
 
   useEffect(() => {
@@ -55,8 +78,20 @@ export function AskScreen() {
   }, [search]);
 
   useEffect(() => {
-    if (savedId === null || answer?.id === savedId) return;
-    api.getAsk(savedId).then(setAnswer).catch((e) => setError(errorMessage(e)));
+    // The sidebar link opens /ask: show an empty page, not the last answer.
+    if (savedId === null) {
+      if (answer || error) clear();
+      return;
+    }
+    if (answer?.id === savedId) return;
+    // An earlier question opens: an answer that is still loading goes only to the history.
+    turn.current++;
+    setPending(null);
+    setError(null);
+    setFailed(null);
+    let live = true;
+    api.getAsk(savedId).then((a) => live && setAnswer(a)).catch((e) => live && setError(errorMessage(e)));
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedId]);
 
@@ -65,7 +100,7 @@ export function AskScreen() {
     void send(question, range);
   };
 
-  const shown = pending ?? answer?.question ?? null;
+  const shown = pending ?? failed?.question ?? answer?.question ?? null;
 
   return (
     <div className="ask-layout">
@@ -73,17 +108,18 @@ export function AskScreen() {
         <nav aria-label="Earlier questions" className="ask-history">
           <div className="nav-label">Earlier questions</div>
           {earlier.map((a) => (
-            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId ? "page" : undefined} title={a.question}>{a.question}</Link>
+            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId && !failed ? "page" : undefined} title={a.question} onClick={() => { setError(null); setFailed(null); }}>{a.question}</Link>
           ))}
         </nav>
       )}
       <div className="ask-main">
         <div className="ask-thread">
           <h1>Ask Morsel</h1>
+          {shown && <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={newQuestion}>New question</button>}
           {!shown && <p className="muted">Ask a question about your meetings. Morsel answers from your notes and transcripts, and shows where each answer comes from.</p>}
           {shown && <div className="question-bubble">{shown}</div>}
           {pending && <p role="status" className="muted">Reading your meetings…</p>}
-          {!pending && answer && (
+          {!pending && !failed && answer && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <AnswerText text={answer.answer} className="answer-text" />
               {answer.sources.length > 0 && (
@@ -101,11 +137,12 @@ export function AskScreen() {
               )}
             </div>
           )}
-          {error && <p role="alert" className="error-text">{error}</p>}
+          {error && <p role="alert" className="error-text">{error}{needsSettings(error) && <> <Link to="/settings/models">Open Settings</Link></>}</p>}
+          {failed && <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={() => void send(failed.question, failed.range)}>Try again</button>}
         </div>
         <form className="ask-form" onSubmit={submit}>
           <label htmlFor="ask-q" className="sr-only">Ask about your meetings</label>
-          <input id="ask-q" type="text" placeholder="Ask about your meetings" value={question} onChange={(e) => setQuestion(e.target.value)} />
+          <input ref={input} id="ask-q" type="text" placeholder="Ask about your meetings" value={question} onChange={(e) => setQuestion(e.target.value)} />
           <label htmlFor="ask-range" className="sr-only">Time range</label>
           <select id="ask-range" value={range} onChange={(e) => setRange(e.target.value as AskRange)}>
             <option value="all">All meetings</option>

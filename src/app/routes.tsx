@@ -7,7 +7,7 @@ import { NoteScreen } from "../screens/note/NoteScreen";
 import { SettingsModelsScreen } from "../screens/SettingsModelsScreen";
 import { WritingScreen } from "../screens/note/WritingScreen";
 import { AskScreen } from "../screens/ask/AskScreen";
-import { NotesScreen } from "../screens/notes/NotesScreen";
+import { meetingPath, NotesScreen } from "../screens/notes/NotesScreen";
 import { SettingsLayout } from "../screens/settings/SettingsLayout";
 import { SettingsCalendarScreen } from "../screens/settings/SettingsCalendarScreen";
 import { SettingsShortcutsScreen } from "../screens/settings/SettingsShortcutsScreen";
@@ -28,12 +28,19 @@ function ShellLayout() {
   const [noteCount, setNoteCount] = useState(0);
 
   useEffect(() => {
-    api.listMeetings(3).then((m) => setRecent(m.map(({ id, title }) => ({ id, title })))).catch(() => {});
+    api.listMeetings(3).then((m) => setRecent(m.map((s) => ({ id: s.id, title: s.title, path: meetingPath(s) })))).catch(() => {});
     api.searchNotes({ limit: 0, offset: 0 }).then((p) => setNoteCount(p.total)).catch(() => {});
   }, [pathname]);
 
+  // #28: only one meeting records at a time, so a live meeting is the newest one.
+  const newNote = async () => {
+    const [last] = await api.listMeetings(1).catch(() => []);
+    if (last && ["recording", "paused"].includes(last.status)) navigate(`/meeting/${last.id}`);
+    else navigate("/", { state: { newNote: true } });
+  };
+
   return (
-    <AppShell recent={recent} noteCount={noteCount} onNewNote={() => navigate("/")}>
+    <AppShell recent={recent} noteCount={noteCount} onNewNote={newNote}>
       <UpdateBar />
       <Outlet />
     </AppShell>

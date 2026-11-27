@@ -269,7 +269,7 @@ Use this loop for each task:
 
 **Files:** create `src/lib/api.ts` (typed `invoke` and `listen` wrappers for Task 13), `src/screens/meeting/MeetingScreen.tsx`, `src/screens/meeting/TranscriptPanel.tsx`; test `src/screens/meeting/MeetingScreen.test.tsx`.
 
-**Interfaces:** `api.ts` exports one function for each command of Task 13, with the same names in camelCase, and `onTranscript`, `onLevels`, `onStatus`, `onNotesDone`, `onNotesFailed`. The notepad is Tiptap. It saves rough notes with `saveUserNotes` 2 s after the last keystroke and on stop. `⌘T` toggles the transcript panel. The panel scrolls to the newest line unless the user scrolled up. "Stop and write notes" calls `stopMeeting`, then `writeNotes`, then goes to `/meeting/:id/writing`. The "Ask about this meeting" box shows but is disabled until Plan 2.
+**Interfaces:** `api.ts` exports one function for each command of Task 13, with the same names in camelCase, and `onTranscript`, `onLevels`, `onStatus`, `onNotesDone`, `onNotesFailed`. The notepad is Tiptap. It saves rough notes with `saveUserNotes` 2 s after the last keystroke, on stop, and when the user leaves the screen, reloads or closes the window. `⌘T` toggles the transcript panel. The panel scrolls to the newest line unless the user scrolled up. "Stop and write notes" calls `stopMeeting`, then `writeNotes`, then goes to `/meeting/:id/writing`. The "Ask about this meeting" box shows but is disabled until Plan 2.
 
 **Tests (mock `@tauri-apps/api`):** `new_transcript_event_adds_a_line_with_speaker_label`, `hide_and_cmd_t_toggle_the_panel`, `rough_notes_save_2s_after_typing`, `stop_saves_notes_then_writes_then_navigates`, `system_audio_warning_shows_in_the_status_bar`.
 
