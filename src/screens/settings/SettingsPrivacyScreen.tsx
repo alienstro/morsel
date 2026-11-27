@@ -60,7 +60,7 @@ export function SettingsPrivacyScreen() {
       <h1 className="serif page-title">Privacy and data</h1>
       <div className="settings-rows">
         <div className="settings-row">
-          <span>Morsel never saves audio. It keeps only the text.</span>
+          <span>Morsel keeps the audio of each meeting on this Mac until you delete it. Delete it from the note, or delete all data below.</span>
         </div>
         <div className="settings-row">
           <span className="grow">
@@ -75,7 +75,7 @@ export function SettingsPrivacyScreen() {
         </div>
         <div className="settings-row">
           <span className="grow">
-            Delete all notes, transcripts and keys
+            Delete all notes, transcripts, audio and keys
             <span className="muted small block">You cannot undo this.</span>
           </span>
           <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Delete all data</button>
@@ -86,7 +86,7 @@ export function SettingsPrivacyScreen() {
       {confirming && (
         <ConfirmDialog
           title="Delete all data?"
-          body="Morsel deletes every note, rough note, transcript, question and setting, and the API keys in the Keychain. You cannot undo this."
+          body="Morsel deletes every note, rough note, transcript, meeting audio, question and setting, and the API keys in the Keychain. You cannot undo this."
           confirmLabel="Delete all data"
           onConfirm={deleteAll}
           onCancel={() => setConfirming(false)}
