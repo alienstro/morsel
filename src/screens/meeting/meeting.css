@@ -1,7 +1,8 @@
 .meeting { min-height: 100%; display: flex; flex-direction: column; }
 .meeting-body { flex-grow: 1; display: flex; min-height: 0; }
 .meeting-nav { width: 208px; flex-shrink: 0; padding: 6px 8px 12px 12px; display: flex; flex-direction: column; gap: 14px; }
-.meeting-brand { padding: 4px 6px; text-decoration: none; }
+/* #32: .brand grows in the row head of the main sidebar; this nav is a column. */
+.meeting-nav .meeting-brand { flex-grow: 0; align-self: flex-start; padding: 4px 6px; text-decoration: none; }
 .meeting-main { flex: 1 1 560px; min-width: 0; padding: 0 8px 8px 0; display: flex; }
 .meeting-card { flex-grow: 1; background: var(--surface); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 10px; }

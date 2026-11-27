@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Link, useNavigate, useParams } from "react-router";
 import {
   api, clock, errorMessage, onLevels, onStatus, onTranscript,
   type MeetingDetail, type MeetingStatus, type MeetingSummary, type TranscriptLine,
 } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { Notepad } from "./Notepad";
 import { TranscriptPanel } from "./TranscriptPanel";
 import "./meeting.css";
 
 const SAVE_DELAY_MS = 2000;
 const LIVE: MeetingStatus[] = ["recording", "paused"];
+// The next mount reads the meeting after this save ends, so it shows the newest notes (issue #17).
+let leaveSave: Promise<void> = Promise.resolve();
 
 type Pauses = { pausedMs: number; pausedAt: number | null };
 const NO_PAUSES: Pauses = { pausedMs: 0, pausedAt: null };
@@ -69,7 +73,7 @@ export function MeetingScreen() {
   useEffect(() => {
     let alive = true;
     startedAt.current = null;
-    api.getMeeting(id).then((d) => {
+    leaveSave.then(() => api.getMeeting(id)).then((d) => {
       if (!alive) return;
       startedAt.current = d.summary.startedAt;
       setDetail(d);
@@ -113,9 +117,30 @@ export function MeetingScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-  }, []);
+  // Save typed notes that wait for the timer when the user leaves, reloads or closes (issue #17).
+  useEffect(() => {
+    const flush = () => {
+      if (!saveTimer.current) return leaveSave;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      // No screen is left to show the error, and a rejection stops the window close.
+      leaveSave = api.saveUserNotes(id, notesRef.current).catch((e) => console.error(e));
+      return leaveSave;
+    };
+    const onUnload = () => void flush();
+    window.addEventListener("beforeunload", onUnload);
+    let offClose = Promise.resolve(() => {});
+    try {
+      offClose = getCurrentWindow().onCloseRequested(flush).catch(() => () => {});
+    } catch {
+      // Not in the Tauri webview, for example the browser stand-in.
+    }
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      offClose.then((off) => off());
+      void flush();
+    };
+  }, [id]);
 
   const saveNow = useCallback(async () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -208,7 +233,7 @@ export function MeetingScreen() {
             <article className="meeting-article">
               <h1 className="serif meeting-title">{detail.summary.title}</h1>
               <div className="meeting-meta muted">
-                <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+                <span>{formatWhen(detail.summary.startedAt)}</span>
                 <span className="chip">{detail.summary.templateName}</span>
               </div>
               <Notepad initial={detail.userNotes} onChange={onNotesChange} />

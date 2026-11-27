@@ -6,7 +6,7 @@ import "../library.css";
 
 const PAGE = 50;
 const SEARCH_WAIT_MS = 250;
-const LIVE = ["recording", "paused"];
+export const LIVE = ["recording", "paused"];
 
 export function meetingPath(m: MeetingSummary): string {
   return LIVE.includes(m.status) ? `/meeting/${m.id}` : `/note/${m.id}`;
