@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { api, errorMessage, type MeetingSummary, type NotesFilter, type Template } from "../../lib/api";
 import { formatWhen, meetingLength } from "../../lib/dates";
 import "../library.css";
+import "../note/note.css";
 
 const PAGE = 50;
 const SEARCH_WAIT_MS = 250;
@@ -10,6 +11,13 @@ export const LIVE = ["recording", "paused"];
 
 export function meetingPath(m: MeetingSummary): string {
   return LIVE.includes(m.status) ? `/meeting/${m.id}` : `/note/${m.id}`;
+}
+
+/** A small sign on a meeting row when its notes failed or were cancelled. */
+export function NotesSign({ status }: { status: MeetingSummary["status"] }) {
+  if (status === "notes_failed") return <span className="chip small" style={{ color: "var(--recording)" }}>Notes failed</span>;
+  if (status === "notes_cancelled") return <span className="chip small muted">Notes cancelled</span>;
+  return null;
 }
 
 /** 4.1 All notes: search, filter by template and person, and open a note. */
@@ -106,7 +114,7 @@ export function NotesScreen() {
             <tbody>
               {items.map((m) => (
                 <tr key={m.id}>
-                  <td><Link to={meetingPath(m)}>{m.title}</Link></td>
+                  <td><Link to={meetingPath(m)}>{m.title}</Link> <NotesSign status={m.status} /></td>
                   <td>{m.templateName}</td>
                   <td>{m.people.length > 0 ? m.people.join(", ") : "—"}</td>
                   <td>{formatWhen(m.startedAt)}</td>

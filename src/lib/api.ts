@@ -11,7 +11,11 @@ export type MeetingSummary = {
   id: number; title: string; templateId: number; templateName: string; status: MeetingStatus; startedAt: number;
   endedAt: number | null; people: string[];
 };
-export type MeetingDetail = { summary: MeetingSummary; lines: TranscriptLine[]; userNotes: string; note: string | null };
+export type MeetingDetail = {
+  summary: MeetingSummary; lines: TranscriptLine[]; userNotes: string; note: string | null;
+  /** The reason of the last notes failure, or null when the notes never failed. */
+  notesError: string | null;
+};
 export type Section = { name: string; hint: string };
 export type TemplateInput = { name: string; description: string; sections: Section[]; instructions: string };
 export type Template = TemplateInput & { id: number; builtIn: boolean; uses: number };

@@ -97,6 +97,7 @@ export function NoteScreen() {
   }
 
   const note = detail.note;
+  const status = detail.summary.status;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(note ?? "");
@@ -149,12 +150,18 @@ export function NoteScreen() {
         <select id="template" value={templateId ?? ""} onChange={(e) => setTemplateId(Number(e.target.value))}>
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
-        <button type="button" className="btn btn-primary" onClick={writeAgain}>{note ? "Write again" : "Write notes"}</button>
+        <button type="button" className="btn btn-primary" onClick={writeAgain}>
+          {status === "notes_failed" ? "Try again" : note ? "Write again" : "Write notes"}
+        </button>
         <button type="button" className="icon-btn-light" aria-label="Delete note" onClick={() => setConfirming(true)}>
           <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
         </button>
       </div>
       {info && <p role="status" className="muted small">{info}</p>}
+      {status === "notes_failed" && (
+        <p role="alert" className="error-text">Morsel could not write the notes: {detail.notesError || "unknown error"}</p>
+      )}
+      {status === "notes_cancelled" && <p className="muted">You cancelled the notes.</p>}
       {note ? (
         <>
           <p className="legend small">
@@ -164,7 +171,7 @@ export function NoteScreen() {
           <NoteBody parts={markYours(note, detail.userNotes)} />
         </>
       ) : (
-        <p className="muted">This meeting has no notes yet.</p>
+        status !== "notes_failed" && status !== "notes_cancelled" && <p className="muted">This meeting has no notes yet.</p>
       )}
       <details className="transcript">
         <summary>Transcript ({detail.lines.length} lines)</summary>

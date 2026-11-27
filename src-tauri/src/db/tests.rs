@@ -107,6 +107,18 @@ fn mark_open_meetings_interrupted_changes_only_recording_and_paused() {
 }
 
 #[test]
+fn get_meeting_returns_the_saved_notes_error() {
+    let (_d, conn) = temp_db();
+    let id = create_meeting(&conn, "failed", 1).unwrap();
+    assert_eq!(get_meeting(&conn, id).unwrap().notes_error, None);
+    set_notes_error(&conn, id, "no notes model").unwrap();
+    assert_eq!(
+        get_meeting(&conn, id).unwrap().notes_error.as_deref(),
+        Some("no notes model")
+    );
+}
+
+#[test]
 fn save_note_and_list_meetings_newest_first() {
     let (_d, conn) = temp_db();
     let a = create_meeting(&conn, "first", 1).unwrap();

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { api, errorMessage, needsSettings, onCalendarChanged, onStatus, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
+import { NotesSign } from "./notes/NotesScreen";
 import "./library.css";
 import "./note/note.css";
 
@@ -171,6 +172,7 @@ export function HomeScreen() {
                 <li key={m.id}>
                   <Link to={LIVE.includes(m.status) ? `/meeting/${m.id}` : `/note/${m.id}`} className="meeting-row">
                     <span className="truncate" style={{ flexGrow: 1, fontWeight: 500 }}>{m.title}</span>
+                    <NotesSign status={m.status} />
                     {LIVE.includes(m.status) && (
                       <span className="small rec-text">
                         <span aria-hidden="true" className="rec-dot" />
