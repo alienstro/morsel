@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, errorMessage, onModelDownload, onNotesModelDownload, onSearchModelDownload, onSearchProgress } from "./api";
 
 export type ModelInfo = { name: string; size: string; about: string };
@@ -31,44 +31,81 @@ type ModelSource = {
   onProgress: (h: (p: Progress) => void) => Promise<() => void>;
 };
 
-const WHISPER: ModelSource = { status: api.modelStatus, download: api.downloadModel, onProgress: onModelDownload };
-const NOTES: ModelSource = { status: api.notesModelStatus, download: api.downloadNotesModel, onProgress: onNotesModelDownload };
-const SEARCH: ModelSource = { status: api.searchModelStatus, download: api.downloadSearchModel, onProgress: onSearchModelDownload };
+type DownloadState = { ready: boolean; downloading: boolean; progress: Progress | null; error: string | null };
 
-/** The download state of one on-device model. */
-function useModelDownload(source: ModelSource) {
-  const [ready, setReady] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const IDLE: DownloadState = { ready: false, downloading: false, progress: null, error: null };
 
-  useEffect(() => {
-    source.status().then(setReady).catch(() => {});
-    const off = source.onProgress(setProgress);
-    return () => {
-      off.then((f) => f());
-    };
-  }, [source]);
-
-  /** Downloads the model. Resolves to true when the model is ready. */
-  const download = async (): Promise<boolean> => {
-    setError(null);
-    setDownloading(true);
-    setProgress({ received: 0, total: 0 });
+/** The download state of one model, outside React, so that it survives a screen change (#21). */
+function modelStore(source: ModelSource) {
+  let state = IDLE;
+  let running: Promise<boolean> | null = null;
+  const listeners = new Set<() => void>();
+  const set = (patch: Partial<DownloadState>) => {
+    state = { ...state, ...patch };
+    listeners.forEach((l) => l());
+  };
+  const run = async (): Promise<boolean> => {
+    set({ error: null, downloading: true, progress: { received: 0, total: 0 } });
+    // The store listens, not the screen, so that no progress is lost while no screen shows it.
+    const off = source.onProgress((progress) => set({ progress }));
     try {
       await source.download();
-      setReady(true);
+      set({ ready: true });
       return true;
     } catch (e) {
-      setError(errorMessage(e));
+      set({ error: errorMessage(e) });
       return false;
     } finally {
-      setDownloading(false);
-      setProgress(null);
+      off.then((f) => f());
+      set({ downloading: false, progress: null });
     }
   };
+  return {
+    source,
+    set,
+    get: () => state,
+    subscribe: (l: () => void) => {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+    /** Downloads the model, or joins the download that runs. Resolves to true when the model is ready. */
+    download: (): Promise<boolean> => {
+      if (running) return running;
+      const p = run().finally(() => {
+        if (running === p) running = null;
+      });
+      return (running = p);
+    },
+    reset: () => {
+      running = null;
+      set(IDLE);
+    },
+  };
+}
 
-  return { ready, downloading, progress, error, download };
+type ModelStore = ReturnType<typeof modelStore>;
+
+const WHISPER = modelStore({ status: api.modelStatus, download: api.downloadModel, onProgress: onModelDownload });
+const NOTES = modelStore({ status: api.notesModelStatus, download: api.downloadNotesModel, onProgress: onNotesModelDownload });
+const SEARCH = modelStore({ status: api.searchModelStatus, download: api.downloadSearchModel, onProgress: onSearchModelDownload });
+
+/** Clears the download state of all models. Tests call it, because the state outlives each render. */
+export function resetModelDownloads() {
+  for (const store of [WHISPER, NOTES, SEARCH]) store.reset();
+}
+
+/** The download state of one on-device model. */
+function useModelDownload(store: ModelStore) {
+  const state = useSyncExternalStore(store.subscribe, store.get);
+
+  useEffect(() => {
+    // A status call that started before the download ended can answer false, so only true counts.
+    store.source.status().then((ready) => ready && store.set({ ready })).catch(() => {});
+  }, [store]);
+
+  return { ...state, download: store.download };
 }
 
 export type ModelDownload = ReturnType<typeof useModelDownload>;
