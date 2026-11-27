@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { markYours } from "../../lib/markYours";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
 import { NoteScreen } from "./NoteScreen";
@@ -88,6 +88,28 @@ describe("WritingScreen", () => {
 });
 
 describe("NoteScreen", () => {
+  // A fixed clock keeps "Today" and "Yesterday" true when the run crosses midnight.
+  const today = new Date(2026, 10, 27, 12, 0);
+  const at = (daysBack: number, h: number, m: number) =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - daysBack, h, m).getTime();
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(today);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [at(0, 20, 45), "Today, 20:45"],
+    [at(1, 16, 30), "Yesterday, 16:30"],
+    [new Date(2026, 10, 2, 9, 30).getTime(), "Mon 2 Nov, 09:30"],
+  ])("note_page_shows_the_date_as_notes_does (%s -> %s)", async (startedAt, expected) => {
+    responses.get_meeting = { summary: { ...summary, status: "done", startedAt }, lines: [], userNotes: "", note: "x" };
+    renderAt("/note/1");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+
   it("note_screen_renders_legend_and_grey_lines", async () => {
     responses.get_meeting = {
       summary: { ...summary, status: "done" },

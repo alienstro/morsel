@@ -56,6 +56,15 @@ afterEach(() => {
 });
 
 describe("MeetingScreen", () => {
+  it("meeting_screen_shows_the_date_as_notes_does", async () => {
+    const d = new Date(2026, 10, 27, 12, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(d);
+    responses.get_meeting = { ...detail, summary: { ...detail.summary, startedAt: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 8, 5).getTime() } };
+    await renderScreen();
+    expect(screen.getByText("Today, 08:05")).toBeInTheDocument();
+  });
+
   it("new_transcript_event_adds_a_line_with_speaker_label", async () => {
     await renderScreen();
     act(() => emit("meeting://transcript", { meetingId: 1, speaker: "others", startMs: 62_000, endMs: 70_000, text: "Probably one week late." }));
