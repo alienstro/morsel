@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke, resetTauri, responses } from "../../test/tauri";
 import { TemplatesScreen } from "./TemplatesScreen";
@@ -67,6 +67,69 @@ describe("TemplatesScreen", () => {
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
   });
 
+  it("hint_without_name_waits_for_a_name", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.change(screen.getByLabelText("Section 3 hint"), { target: { value: "what the customer asked for" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Give section 3 a name.");
+    const field = screen.getByLabelText("Section 3 name");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription("Give section 3 a name.");
+    expect(field).toHaveFocus();
+    expect(screen.getByLabelText("Section 1 name")).not.toHaveAttribute("aria-invalid", "true");
+    expect(calls("save_template")).toHaveLength(0);
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "Asks" } });
+    expect(field).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(calls("save_template")).toHaveLength(1));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+  });
+
+  it("hint_without_name_names_every_row", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.change(screen.getByLabelText("Section 1 name"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Section 4 hint"), { target: { value: "Who does what" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Give sections 1 and 4 a name\.$/);
+    expect(screen.getByLabelText("Section 4 name")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("empty_section_row_saves_without_error", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(calls("save_template")).toHaveLength(1));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("no_named_section_says_add_one", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Retro" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Add at least one section\.$/);
+    expect(calls("save_template")).toHaveLength(0);
+  });
+
+  it("no_template_name_says_name_it_first", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Give the template a name\.$/);
+    expect(calls("save_template")).toHaveLength(0);
+  });
+
   it("remove_section_drops_it", async () => {
     renderTemplates();
     fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
@@ -93,11 +156,36 @@ describe("TemplatesScreen", () => {
     await screen.findByText("Used 14 times");
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    await waitFor(() => expect(calls("reset_template")).toEqual([{ id: 1 }]));
     fireEvent.click(screen.getByRole("button", { name: /Design crit/ }));
     expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("reset_asks_first", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "My own rules." } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    const dialog = screen.getByRole("dialog", { name: "Reset this template?" });
+    expect(calls("reset_template")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset template" }));
+    await waitFor(() => expect(calls("reset_template")).toEqual([{ id: 1 }]));
+    expect(await screen.findByText("Reset to the built-in values.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("Be clear.");
+  });
+
+  it("reset_cancel_and_escape_keep_the_user_version", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "My own rules." } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls("reset_template")).toHaveLength(0);
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("My own rules.");
   });
 
   it("delete_asks_first", async () => {
@@ -117,5 +205,83 @@ describe("TemplatesScreen", () => {
     responses.list_templates = [general, product, mine, { ...general, id: 9, name: "General copy", builtIn: false }];
     fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("General copy"));
+  });
+
+  it("switch_with_edits_asks_and_cancel_keeps_them", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "New rules." } });
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+    const dialog = screen.getByRole("dialog", { name: "Discard your changes?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Product sync");
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("New rules.");
+  });
+
+  it("switch_with_edits_discards_on_confirm", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "New rules." } });
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("General");
+    fireEvent.click(screen.getByRole("button", { name: /Product sync/ }));
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("Name owners.");
+  });
+
+  it("duplicate_and_new_with_edits_ask_first", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "General v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+    expect(screen.getByRole("dialog", { name: "Discard your changes?" })).toBeInTheDocument();
+    expect(calls("duplicate_template")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    expect(screen.getByRole("dialog", { name: "Discard your changes?" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("General v2");
+  });
+
+  it("switch_without_edits_does_not_ask", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Design crit/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("General");
+  });
+
+  it("switch_after_save_does_not_ask", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "New rules." } });
+    responses.list_templates = [general, { ...product, instructions: "New rules." }, mine];
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("General");
+  });
+
+  it("link_with_edits_asks_before_leaving", async () => {
+    render(
+      <MemoryRouter initialEntries={["/templates"]}>
+        <Link to="/notes">Notes</Link>
+        <Routes>
+          <Route path="/templates" element={<TemplatesScreen />} />
+          <Route path="/notes" element={<p>notes page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "General v2" } });
+    fireEvent.click(screen.getByRole("link", { name: "Notes" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("General v2");
+    fireEvent.click(screen.getByRole("link", { name: "Notes" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
+    expect(await screen.findByText("notes page")).toBeInTheDocument();
   });
 });

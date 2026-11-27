@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModelDownloads } from "../lib/localModel";
@@ -57,6 +57,15 @@ describe("HomeScreen earlier notes", () => {
     fireEvent.click(screen.getByRole("link", { name: "View all" }));
     expect(await screen.findByText("notes page")).toBeInTheDocument();
   });
+
+  it("home_template_name_stays_on_one_line", async () => {
+    renderAt("/");
+    const link = (await screen.findByText("Acme discovery call")).closest("a")!;
+    const template = within(link).getByText("Sales call");
+    expect(template).toHaveClass("truncate");
+    expect(template.style.flexShrink).toBe("0");
+    expect(template.style.maxWidth).not.toBe("");
+  });
 });
 
 describe("HomeScreen ask box", () => {
@@ -90,6 +99,18 @@ describe("HomeScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("microphone permission");
   });
+
+  it("missing_model_error_is_plain_and_links_to_settings", async () => {
+    responses.start_meeting = () =>
+      Promise.reject({ code: "invalid", message: "invalid value: download the transcription model in Settings first" });
+    renderAt("/");
+    fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Download the transcription model in Settings first.");
+    expect(alert).not.toHaveTextContent("invalid value");
+    fireEvent.click(screen.getByRole("link", { name: "Open Settings" }));
+    expect(await screen.findByLabelText("Notes API key")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsModelsScreen", () => {
@@ -102,14 +123,103 @@ describe("SettingsModelsScreen", () => {
     expect((await screen.findAllByText("A key is saved.")).length).toBeGreaterThan(0);
   });
 
+  it("test_key_saves_the_form_values_first", async () => {
+    responses.has_api_key = true;
+    renderAt("/settings/models");
+    fireEvent.change(await screen.findByLabelText(/^Base URL \(OpenRouter/), { target: { value: "https://qx13.invalid/v1" } });
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "qx13/typed-not-saved" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("The key works.")).toBeInTheDocument();
+    expect(screen.getByText("Settings saved.")).toBeInTheDocument();
+    const order = invoke.mock.calls.map(([c]) => c).filter((c) => ["save_settings", "test_notes_key"].includes(c));
+    expect(order).toEqual(["save_settings", "test_notes_key"]);
+    expect(invoke).toHaveBeenCalledWith("save_settings", {
+      settings: { ...settings, notesBaseUrl: "https://qx13.invalid/v1", notesModel: "qx13/typed-not-saved" },
+    });
+  });
+
+  it("test_key_asks_for_a_key_when_none_is_saved", async () => {
+    responses.has_api_key = false;
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("Add and save the notes API key first.")).toBeInTheDocument();
+    expect(invoke.mock.calls.map(([c]) => c)).not.toContain("test_notes_key");
+  });
+
+  it("test_key_button_is_disabled_while_a_test_runs", async () => {
+    responses.has_api_key = true;
+    responses.test_notes_key = () => new Promise(() => {});
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test key" })).toBeDisabled());
+  });
+
+  it("key_result_clears_after_an_edit", async () => {
+    responses.has_api_key = true;
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
+    expect(await screen.findByText("The key works.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "provider/other" } });
+    expect(screen.queryByText("The key works.")).not.toBeInTheDocument();
+  });
+
+  it("settings_saved_message_clears_after_an_edit", async () => {
+    renderAt("/settings/models");
+    fireEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes model"), { target: { value: "provider/other" } });
+    expect(screen.queryByText("Settings saved.")).not.toBeInTheDocument();
+  });
+
+  const KEYS = [["Notes API key", "notes_api_key"], ["Transcription API key", "transcribe_api_key"]];
+
+  async function keyField(label: string) {
+    responses.get_settings = { ...settings, transcribeMode: "cloud" };
+    responses.has_api_key = true;
+    renderAt("/settings/models");
+    const field = within((await screen.findByLabelText(label)).closest(".field") as HTMLElement);
+    await field.findByText("A key is saved."); // has_api_key resolves after the first render.
+    return field;
+  }
+
+  it.each(KEYS)("key_save_is_disabled_while_the_field_is_blank: %s", async (label, account) => {
+    const field = await keyField(label);
+    const save = field.getByRole("button", { name: "Save key" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    fireEvent.change(field.getByLabelText(label), { target: { value: "   " } });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(invoke).not.toHaveBeenCalledWith("set_api_key", expect.anything());
+    fireEvent.change(field.getByLabelText(label), { target: { value: "sk-new" } });
+    fireEvent.click(save);
+    expect(await field.findByText("Saved in the Keychain.")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("set_api_key", { account, key: "sk-new" });
+  });
+
+  it.each(KEYS)("key_remove_asks_first: %s", async (label, account) => {
+    const field = await keyField(label);
+    fireEvent.click(field.getByRole("button", { name: "Remove key" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("set_api_key", expect.anything());
+    fireEvent.click(field.getByRole("button", { name: "Remove key" }));
+    const dialog = screen.getByRole("dialog", { name: `Remove the ${label}?` });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove key" }));
+    expect(await field.findByText("The key is removed.")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("set_api_key", { account, key: "" });
+    expect(field.queryByRole("button", { name: "Remove key" })).not.toBeInTheDocument();
+  });
+
   it("test_key_shows_ok_and_error_messages", async () => {
+    responses.has_api_key = true;
     responses.test_notes_key = undefined;
     renderAt("/settings/models");
     fireEvent.click(await screen.findByRole("button", { name: "Test key" }));
     expect(await screen.findByText("The key works.")).toBeInTheDocument();
     responses.test_notes_key = () => Promise.reject({ code: "invalid_key", message: "the API key is not valid" });
     fireEvent.click(screen.getByRole("button", { name: "Test key" }));
-    expect(await screen.findByText("the API key is not valid")).toBeInTheDocument();
+    expect(await screen.findByText("The API key is not valid.")).toBeInTheDocument();
   });
 
   it("download_shows_progress_from_events", async () => {
@@ -260,5 +370,58 @@ describe("HomeScreen next meeting", () => {
     renderAt("/");
     fireEvent.click(await screen.findByRole("button", { name: "Start a note without the calendar" }));
     expect(screen.getByPlaceholderText("Meeting title (optional)")).toBeInTheDocument();
+  });
+});
+
+describe("HomeScreen live meeting", () => {
+  const live = (status: string) => ({ id: 7, title: "Acme sync", templateId: 1, templateName: "General", status, startedAt: Date.now(), endedAt: null, people: [] });
+
+  it("home_shows_the_recording_meeting_instead_of_start", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(screen.queryByRole("button", { name: /Start notes/ })).not.toBeInTheDocument();
+    expect(await screen.findByText("Recording: Acme sync")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Start notes/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Open the meeting" }));
+    expect(await screen.findByText("meeting page")).toBeInTheDocument();
+  });
+
+  it("home_shows_a_paused_meeting", async () => {
+    responses.list_meetings = [live("paused")];
+    renderAt("/");
+    expect(await screen.findByText("Paused: Acme sync")).toBeInTheDocument();
+  });
+
+  it("home_shows_the_start_card_after_stop", async () => {
+    responses.list_meetings = [live("stopped")];
+    renderAt("/");
+    await screen.findByRole("link", { name: /Acme sync/ });
+    expect(screen.getByRole("button", { name: /Start notes/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Recording: /)).not.toBeInTheDocument();
+  });
+
+  it("home_reloads_when_the_meeting_status_changes", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    await screen.findByText("Recording: Acme sync");
+    responses.list_meetings = [live("stopped")];
+    await act(async () => emit("meeting://status", { meetingId: 7, status: "stopped" }));
+    expect(await screen.findByRole("button", { name: /Start notes/ })).toBeInTheDocument();
+  });
+
+  it("home_shows_the_recording_before_the_calendar_meeting", async () => {
+    responses.upcoming_events = [{ id: "e1", provider: "google", title: "Weekly product sync", start: Date.now() + 300_000, end: Date.now() + 1_800_000, link: null, people: [] }];
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(await screen.findByText("Recording: Acme sync")).toBeInTheDocument();
+    await act(async () => {});
+    expect(screen.queryByText("Weekly product sync")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start a note without the calendar" })).not.toBeInTheDocument();
+  });
+
+  it("earlier_notes_marks_the_recording_meeting", async () => {
+    responses.list_meetings = [live("recording")];
+    renderAt("/");
+    expect(await screen.findByRole("link", { name: /Acme sync.*Recording/ })).toHaveAttribute("href", "/meeting/7");
   });
 });

@@ -191,7 +191,7 @@ describe("AI step", () => {
     await screen.findByText("Allowed");
     await act(async () => fail({ code: "network", message: "no network" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no network");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No network.");
   });
 
   it("ai_step_keeps_both_local_downloads_after_back_and_continue", async () => {

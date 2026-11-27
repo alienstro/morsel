@@ -1,9 +1,11 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { type ReactNode, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { markYours, type NotePart } from "../../lib/markYours";
+import { LIVE } from "../notes/NotesScreen";
 import "./note.css";
 
 const HEADING = /^#{1,3}\s+(.*)$/;
@@ -56,10 +58,17 @@ export function NoteScreen() {
   const [confirmingAudio, setConfirmingAudio] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     api.getMeeting(id).then((d) => {
+      if (!alive) return;
       // The after job still transcribes this meeting: the writing page shows its progress.
       if (d.summary.status === "transcribing") {
         navigate(`/meeting/${id}/writing`, { replace: true });
+        return;
+      }
+      // A live meeting has no notes yet: the meeting screen stops it first (#18).
+      if (LIVE.includes(d.summary.status)) {
+        navigate(`/meeting/${id}`, { replace: true });
         return;
       }
       setDetail(d);
@@ -67,6 +76,9 @@ export function NoteScreen() {
     }).catch((e) => setInfo(errorMessage(e)));
     api.listTemplates().then(setTemplates).catch(() => {});
     api.audioSize(id).then(setAudioBytes).catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [id, navigate]);
 
   const deleteAudio = async () => {
@@ -80,7 +92,9 @@ export function NoteScreen() {
     }
   };
 
-  if (!detail) return <p className="muted page">{info ?? "Loading the note…"}</p>;
+  if (!detail) {
+    return <p className="muted page">{info ?? "Loading the note…"}{info && <> <Link to="/notes">Back to Notes</Link></>}</p>;
+  }
 
   const note = detail.note;
   const copy = async () => {
@@ -124,7 +138,7 @@ export function NoteScreen() {
     <div className="page">
       <h1 className="serif page-title">{detail.summary.title}</h1>
       <div className="row muted small">
-        <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+        <span>{formatWhen(detail.summary.startedAt)}</span>
         <span className="chip">{detail.summary.templateName}</span>
       </div>
       <div className="row">

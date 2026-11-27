@@ -32,12 +32,23 @@ describe("ReminderApp", () => {
     responses.start_from_reminder = () => Promise.reject({ code: "already_recording", message: "a meeting is already recording" });
     render(<ReminderApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
-    expect(await screen.findByText("a meeting is already recording")).toBeInTheDocument();
+    expect(await screen.findByText("A meeting is already recording. Stop it first.")).toBeInTheDocument();
   });
 
   it("dismiss_closes_the_reminder", async () => {
     render(<ReminderApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(invoke.mock.calls.some(([c]) => c === "dismiss_reminder")).toBe(true));
+  });
+
+  it("reminder_css_does_not_style_the_main_window", () => {
+    // main.tsx always imports ReminderApp, so its page rules also reach the main window (#16).
+    expect(getComputedStyle(document.body).overflow).not.toBe("hidden");
+    document.documentElement.dataset.window = "reminder";
+    try {
+      expect(getComputedStyle(document.body).overflow).toBe("hidden");
+    } finally {
+      delete document.documentElement.dataset.window;
+    }
   });
 });

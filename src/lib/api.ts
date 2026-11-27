@@ -123,14 +123,50 @@ export const onSearchModelDownload = (h: (e: { received: number; total: number }
 /** The search index: the meetings or parts done so far, and the total. */
 export const onSearchProgress = (h: (e: { done: number; total: number }) => void) => on("search://progress", h);
 
+/** The plain text for each `MorselError` code whose backend text is internal (issue #24). */
+const PLAIN_TEXT: Record<string, string> = {
+  db: "Morsel could not read or save its data. Restart Morsel and try again.",
+  not_found: "Morsel could not find this item. It may be deleted.",
+  rate_limit: "The provider rate limit is reached. Wait a minute and try again.",
+  http: "Morsel could not reach the provider. Check your internet connection and try again.",
+  mic_permission_denied: "Morsel has no microphone permission. Turn it on in System Settings, then try again.",
+  system_audio_permission_denied: "Morsel has no system audio permission. Turn it on in System Settings, then try again.",
+  audio: "Morsel could not record the audio. Check your microphone and try again.",
+  transcribe: "Morsel could not transcribe the audio. Try again.",
+  model_checksum: "The downloaded model is damaged. Download it again in Settings.",
+  already_recording: "A meeting is already recording. Stop it first.",
+  keychain: "Morsel could not use the Keychain. Unlock your Mac and try again.",
+  io: "Morsel could not read or save a file. Check the free disk space and try again.",
+};
+
 /** The text to show for any error from a command. */
 export function errorMessage(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) return String((error as MorselError).message);
-  return String(error);
+  if (!error || typeof error !== "object" || !("message" in error)) return String(error);
+  const { code, message } = error as MorselError;
+  if (code === "not_found" && /meeting \d+$/.test(message)) return "This note was deleted.";
+  if (code === "http") {
+    // Issue #24: a provider status or a Composio reason is not a network fault, so keep it.
+    const detail = String(message).replace(/^network or provider error: /, "");
+    const status = /^HTTP (\d+)/.exec(detail)?.[1];
+    if (status) return `The provider returned the error HTTP ${status}. Check the provider settings and try again.`;
+    if (detail.startsWith("Composio")) return detail.charAt(detail.length - 1) === "." ? detail : `${detail}.`;
+  }
+  if (code && PLAIN_TEXT[code]) return PLAIN_TEXT[code];
+  if (!code) return String(message);
+  // Issue #24: the other codes carry a sentence for the user, so drop the `invalid value: ` prefix.
+  const text = String(message).replace(/^invalid value: /, "");
+  return text.charAt(0).toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? "" : ".");
 }
 
-/** `m:ss` from milliseconds. */
+// shortcut: matches the backend text, as no error code marks a missing setup; add a code if more screens need it.
+/** True when the error text tells the user to change something in Settings → Models. */
+export const needsSettings = (text: string) => text.includes(" in Settings");
+
+/** `m:ss`, or `h:mm:ss` from one hour, from milliseconds. */
 export function clock(ms: number): string {
   const total = Math.floor(ms / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor(total / 60) % 60;
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
