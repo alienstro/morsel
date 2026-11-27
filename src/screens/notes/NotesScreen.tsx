@@ -100,7 +100,7 @@ export function NotesScreen() {
                 <th scope="col" style={{ width: 120 }}>Template</th>
                 <th scope="col" style={{ width: 180 }}>People</th>
                 <th scope="col" style={{ width: 150 }}>Date</th>
-                <th scope="col" className="num" style={{ width: 70 }}>Length</th>
+                <th scope="col" className="num" style={{ width: 70 }} title="Time from start to stop, with the paused time">Length</th>
               </tr>
             </thead>
             <tbody>

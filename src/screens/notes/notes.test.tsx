@@ -60,6 +60,12 @@ describe("NotesScreen", () => {
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Meeting", "Template", "People", "Date", "Length"]);
   });
 
+  it("length_header_says_that_it_counts_the_paused_time", async () => {
+    renderNotes();
+    await screen.findByText("Weekly product sync");
+    expect(screen.getByRole("columnheader", { name: "Length" })).toHaveAttribute("title", "Time from start to stop, with the paused time");
+  });
+
   it("search_waits_then_sends_query", async () => {
     renderNotes();
     await screen.findByText("Weekly product sync");
