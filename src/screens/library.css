@@ -32,6 +32,7 @@
 .tpl-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 12px; align-items: center; }
 .tpl-grid label { color: var(--muted); }
 .tpl-input { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font: 400 13px var(--font-ui); color: var(--text); min-width: 0; }
+.tpl-input[aria-invalid="true"] { border-color: var(--recording); }
 .tpl-sections { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 4px; }
 .tpl-sections legend { padding: 0 0 6px; font-weight: 600; font-size: 12px; }
 .section-row { display: flex; align-items: center; gap: 6px; }
@@ -80,3 +81,5 @@
 .shortcut-key { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-sunk); font: 500 12px var(--font-ui); white-space: nowrap; }
 .shortcut-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .shortcut-list li { display: flex; align-items: center; gap: 12px; }
+.rec-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--recording); }
+.rec-text { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; color: var(--recording); }

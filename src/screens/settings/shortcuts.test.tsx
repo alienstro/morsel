@@ -35,7 +35,7 @@ describe("SettingsShortcutsScreen", () => {
   });
 
   it("refused_shortcut_shows_the_error", async () => {
-    responses.set_global_shortcut = () => Promise.reject({ code: "invalid", message: "A shortcut needs Command, Control or Option." });
+    responses.set_global_shortcut = () => Promise.reject({ code: "invalid", message: "invalid value: A shortcut needs Command, Control or Option." });
     render(<MemoryRouter><SettingsShortcutsScreen /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: "Change" }));
     fireEvent.keyDown(window, { key: "j", code: "KeyJ", shiftKey: true });

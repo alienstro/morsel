@@ -1,15 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Link, useNavigate, useParams } from "react-router";
 import {
   api, clock, errorMessage, onLevels, onStatus, onTranscript,
   type MeetingDetail, type MeetingStatus, type MeetingSummary, type TranscriptLine,
 } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { Notepad } from "./Notepad";
 import { TranscriptPanel } from "./TranscriptPanel";
 import "./meeting.css";
 
 const SAVE_DELAY_MS = 2000;
 const LIVE: MeetingStatus[] = ["recording", "paused"];
+// The next mount reads the meeting after this save ends, so it shows the newest notes (issue #17).
+let leaveSave: Promise<void> = Promise.resolve();
+
+type Pauses = { pausedMs: number; pausedAt: number | null };
+const NO_PAUSES: Pauses = { pausedMs: 0, pausedAt: null };
+
+// The backend keeps no paused time, so the window keeps it; it survives a reload (issue #27).
+// The key has startedAt because SQLite can give a deleted meeting's id to a new meeting.
+function pauseKey(id: number, startedAt: number) {
+  return `morsel.pauses.${id}.${startedAt}`;
+}
+
+function loadPauses(key: string): Pauses {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) ?? "null") ?? NO_PAUSES;
+  } catch {
+    return NO_PAUSES;
+  }
+}
+
+function trackPause(key: string, status: MeetingStatus, at: number) {
+  const p = loadPauses(key);
+  let next: Pauses;
+  if (status === "paused" && p.pausedAt === null) next = { ...p, pausedAt: at };
+  else if (status === "recording" && p.pausedAt !== null) next = { pausedMs: p.pausedMs + at - p.pausedAt, pausedAt: null };
+  else return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Without storage, the clock counts the paused time, as before (issue #27).
+  }
+}
 
 function Bars({ level }: { level: number }) {
   const heights = [0.5, 1, 0.7].map((f) => Math.max(2, Math.min(10, Math.round(level * 40 * f))));
@@ -34,11 +68,14 @@ export function MeetingScreen() {
   const [now, setNow] = useState(Date.now());
   const notesRef = useRef("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    api.getMeeting(id).then((d) => {
+    startedAt.current = null;
+    leaveSave.then(() => api.getMeeting(id)).then((d) => {
       if (!alive) return;
+      startedAt.current = d.summary.startedAt;
       setDetail(d);
       setLines(d.lines);
       setStatus(d.summary.status);
@@ -49,6 +86,9 @@ export function MeetingScreen() {
       onTranscript((line) => line.meetingId === id && setLines((prev) => [...prev, line])),
       onStatus((e) => {
         if (e.meetingId !== id) return;
+        const at = Date.now();
+        if (startedAt.current !== null) trackPause(pauseKey(id, startedAt.current), e.status, at);
+        setNow(at);
         setStatus(e.status);
         if (e.warning) setWarning(e.warning);
       }),
@@ -77,9 +117,30 @@ export function MeetingScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-  }, []);
+  // Save typed notes that wait for the timer when the user leaves, reloads or closes (issue #17).
+  useEffect(() => {
+    const flush = () => {
+      if (!saveTimer.current) return leaveSave;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      // No screen is left to show the error, and a rejection stops the window close.
+      leaveSave = api.saveUserNotes(id, notesRef.current).catch((e) => console.error(e));
+      return leaveSave;
+    };
+    const onUnload = () => void flush();
+    window.addEventListener("beforeunload", onUnload);
+    let offClose = Promise.resolve(() => {});
+    try {
+      offClose = getCurrentWindow().onCloseRequested(flush).catch(() => () => {});
+    } catch {
+      // Not in the Tauri webview, for example the browser stand-in.
+    }
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      offClose.then((off) => off());
+      void flush();
+    };
+  }, [id]);
 
   const saveNow = useCallback(async () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -116,7 +177,8 @@ export function MeetingScreen() {
   }
 
   const live = LIVE.includes(status);
-  const elapsed = clock(Math.max(0, now - detail.summary.startedAt));
+  const pauses = loadPauses(pauseKey(id, detail.summary.startedAt));
+  const elapsed = clock(Math.max(0, (pauses.pausedAt ?? now) - detail.summary.startedAt - pauses.pausedMs));
 
   return (
     <div className="meeting">
@@ -171,7 +233,7 @@ export function MeetingScreen() {
             <article className="meeting-article">
               <h1 className="serif meeting-title">{detail.summary.title}</h1>
               <div className="meeting-meta muted">
-                <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+                <span>{formatWhen(detail.summary.startedAt)}</span>
                 <span className="chip">{detail.summary.templateName}</span>
               </div>
               <Notepad initial={detail.userNotes} onChange={onNotesChange} />
