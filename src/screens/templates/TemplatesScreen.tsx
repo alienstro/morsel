@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
+import { useLeaveGuard } from "../../app/useLeaveGuard";
 import { api, errorMessage, type Section, type Template, type TemplateInput } from "../../lib/api";
 import "../library.css";
 
@@ -26,8 +27,13 @@ export function TemplatesScreen() {
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<"delete" | "reset" | null>(null);
+  const [pending, setPending] = useState<(() => void) | null>(null);
 
   const current = templates.find((t) => t.id === selected) ?? null;
+  const dirty = JSON.stringify(form) !== JSON.stringify(current ? toInput(current) : EMPTY);
+  // Ask before an action or a link replaces the form and drops edits that are not saved (#22).
+  const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
+  const { leaveTo, leave, stay } = useLeaveGuard(dirty);
 
   const load = async (select?: number | null) => {
     try {
@@ -109,13 +115,13 @@ export function TemplatesScreen() {
       <section aria-labelledby="tpl-title" className="tpl-list">
         <div className="tpl-list-head">
           <h1 id="tpl-title">Templates</h1>
-          <button type="button" className="icon-btn-light" aria-label="New template" onClick={startNew}>
+          <button type="button" className="icon-btn-light" aria-label="New template" onClick={() => guard(startNew)}>
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" {...stroke}><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {templates.map((t) => (
-            <button key={t.id} type="button" className="tpl-item" aria-current={t.id === selected ? "true" : undefined} onClick={() => choose(t)}>
+            <button key={t.id} type="button" className="tpl-item" aria-current={t.id === selected ? "true" : undefined} onClick={() => guard(() => choose(t))}>
               <span className="name">{t.name}</span>
               <span className="muted small">{usageLabel(t)}</span>
             </button>
@@ -164,7 +170,7 @@ export function TemplatesScreen() {
 
         <div className="row">
           <button type="submit" className="btn btn-primary">Save template</button>
-          {current && <button type="button" className="btn" onClick={() => run(() => api.duplicateTemplate(current.id), "Copied.")}>Duplicate</button>}
+          {current && <button type="button" className="btn" onClick={() => guard(() => void run(() => api.duplicateTemplate(current.id), "Copied."))}>Duplicate</button>}
           <span style={{ flexGrow: 1 }} />
           {current?.builtIn && <button type="button" className="btn" onClick={() => setConfirming("reset")}>Reset</button>}
           {current && !current.builtIn && <button type="button" className="btn btn-danger" onClick={() => setConfirming("delete")}>Delete</button>}
@@ -190,6 +196,22 @@ export function TemplatesScreen() {
           confirmLabel="Delete template"
           onConfirm={remove}
           onCancel={() => setConfirming(null)}
+        />
+      )}
+      {(pending || leaveTo) && (
+        <ConfirmDialog
+          title="Discard your changes?"
+          body="Your edits to this template are not saved."
+          confirmLabel="Discard changes"
+          onConfirm={() => {
+            setPending(null);
+            if (pending) pending();
+            else leave();
+          }}
+          onCancel={() => {
+            setPending(null);
+            stay();
+          }}
         />
       )}
     </div>
