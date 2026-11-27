@@ -19,6 +19,7 @@ export function AskScreen() {
   const [pending, setPending] = useState<string | null>(null);
   const [earlier, setEarlier] = useState<AskAnswer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ question: string; range: AskRange } | null>(null);
   const askedFromUrl = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   // A new question bumps this, so an older answer that arrives late goes only to the history.
@@ -28,6 +29,7 @@ export function AskScreen() {
     const q = text.trim();
     if (!q) return;
     setError(null);
+    setFailed(null);
     setPending(q);
     const mine = ++turn.current;
     try {
@@ -38,7 +40,10 @@ export function AskScreen() {
       setQuestion("");
       if (result.id !== null) navigate(`/ask/${result.id}`, { replace: true });
     } catch (e) {
-      if (mine === turn.current) setError(errorMessage(e));
+      if (mine === turn.current) {
+        setError(errorMessage(e));
+        setFailed({ question: q, range: scope });
+      }
     } finally {
       if (mine === turn.current) setPending(null);
     }
@@ -50,6 +55,7 @@ export function AskScreen() {
     setPending(null);
     setQuestion("");
     setError(null);
+    setFailed(null);
   };
 
   const newQuestion = () => {
@@ -82,6 +88,7 @@ export function AskScreen() {
     turn.current++;
     setPending(null);
     setError(null);
+    setFailed(null);
     let live = true;
     api.getAsk(savedId).then((a) => live && setAnswer(a)).catch((e) => live && setError(errorMessage(e)));
     return () => { live = false; };
@@ -93,7 +100,7 @@ export function AskScreen() {
     void send(question, range);
   };
 
-  const shown = pending ?? answer?.question ?? null;
+  const shown = pending ?? failed?.question ?? answer?.question ?? null;
 
   return (
     <div className="ask-layout">
@@ -101,7 +108,7 @@ export function AskScreen() {
         <nav aria-label="Earlier questions" className="ask-history">
           <div className="nav-label">Earlier questions</div>
           {earlier.map((a) => (
-            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId ? "page" : undefined} title={a.question}>{a.question}</Link>
+            <Link key={a.id} to={`/ask/${a.id}`} aria-current={a.id === savedId && !failed ? "page" : undefined} title={a.question} onClick={() => { setError(null); setFailed(null); }}>{a.question}</Link>
           ))}
         </nav>
       )}
@@ -112,7 +119,7 @@ export function AskScreen() {
           {!shown && <p className="muted">Ask a question about your meetings. Morsel answers from your notes and transcripts, and shows where each answer comes from.</p>}
           {shown && <div className="question-bubble">{shown}</div>}
           {pending && <p role="status" className="muted">Reading your meetings…</p>}
-          {!pending && answer && (
+          {!pending && !failed && answer && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <AnswerText text={answer.answer} className="answer-text" />
               {answer.sources.length > 0 && (
@@ -131,6 +138,7 @@ export function AskScreen() {
             </div>
           )}
           {error && <p role="alert" className="error-text">{error}{needsSettings(error) && <> <Link to="/settings/models">Open Settings</Link></>}</p>}
+          {failed && <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={() => void send(failed.question, failed.range)}>Try again</button>}
         </div>
         <form className="ask-form" onSubmit={submit}>
           <label htmlFor="ask-q" className="sr-only">Ask about your meetings</label>

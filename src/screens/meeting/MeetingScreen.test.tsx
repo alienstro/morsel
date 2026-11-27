@@ -255,4 +255,25 @@ describe("MeetingScreen", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("ask", { question: "Who is blocked?", range: "all", meetingId: 1 }));
     expect(await screen.findByText("Leo is blocked on the API.")).toBeInTheDocument();
   });
+
+  it("meeting_panel_failed_question_shows_error_and_tries_again", async () => {
+    responses.ask = { id: null, question: "Who is blocked?", answer: "Leo is blocked on the API.", sources: [] };
+    await renderScreen();
+    fireEvent.change(screen.getByLabelText("Ask about this meeting"), { target: { value: "Who is blocked?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText("Leo is blocked on the API.")).toBeInTheDocument();
+
+    responses.ask = () => Promise.reject({ code: "network", message: "network or provider error: timeout" });
+    fireEvent.change(screen.getByLabelText("Ask about this meeting"), { target: { value: "What is next?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Network or provider error: timeout.");
+    expect(screen.getByText("What is next?", { selector: ".question-bubble" })).toBeInTheDocument();
+    expect(screen.queryByText("Leo is blocked on the API.")).not.toBeInTheDocument();
+
+    responses.ask = { id: null, question: "What is next?", answer: "Ship the beta.", sources: [] };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Ship the beta.")).toBeInTheDocument();
+    expect(invoke).toHaveBeenLastCalledWith("ask", { question: "What is next?", range: "all", meetingId: 1 });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

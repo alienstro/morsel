@@ -10,6 +10,7 @@ export function TranscriptPanel({ meetingId, lines, onHide }: Props) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [failed, setFailed] = useState<{ question: string; message: string } | null>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const followRef = useRef(true);
 
@@ -23,20 +24,26 @@ export function TranscriptPanel({ meetingId, lines, onHide }: Props) {
     if (list) followRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   };
 
-  const ask = async (e: FormEvent) => {
-    e.preventDefault();
-    const q = question.trim();
+  const send = async (text: string) => {
+    const q = text.trim();
     if (!q) return;
     setAsking(true);
+    setFailed(null);
     try {
       const result = await api.ask(q, "all", meetingId);
       setAnswer(result.answer);
       setQuestion("");
     } catch (err) {
-      setAnswer(errorMessage(err));
+      setAnswer(null);
+      setFailed({ question: q, message: errorMessage(err) });
     } finally {
       setAsking(false);
     }
+  };
+
+  const ask = (e: FormEvent) => {
+    e.preventDefault();
+    void send(question);
   };
 
   return (
@@ -61,6 +68,13 @@ export function TranscriptPanel({ meetingId, lines, onHide }: Props) {
       {(asking || answer) && (
         <div role="status" className="panel-answer">
           {asking ? <p className="muted">Reading this meeting…</p> : <AnswerText text={answer ?? ""} />}
+        </div>
+      )}
+      {!asking && failed && (
+        <div className="panel-answer" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="question-bubble">{failed.question}</div>
+          <p role="alert" className="error-text">{failed.message}</p>
+          <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={() => void send(failed.question)}>Try again</button>
         </div>
       )}
       <form className="ask-box" onSubmit={ask}>
