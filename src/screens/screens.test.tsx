@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emit, invoke, resetTauri, responses } from "../test/tauri";
@@ -54,6 +54,15 @@ describe("HomeScreen earlier notes", () => {
     expect(screen.getByText("16:30")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "View all" }));
     expect(await screen.findByText("notes page")).toBeInTheDocument();
+  });
+
+  it("home_template_name_stays_on_one_line", async () => {
+    renderAt("/");
+    const link = (await screen.findByText("Acme discovery call")).closest("a")!;
+    const template = within(link).getByText("Sales call");
+    expect(template).toHaveClass("truncate");
+    expect(template.style.flexShrink).toBe("0");
+    expect(template.style.maxWidth).not.toBe("");
   });
 });
 
