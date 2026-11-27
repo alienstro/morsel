@@ -7,6 +7,6 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
-    css: { include: /reminder\.css$/ },
+    css: { include: [/meeting\.css$/, /tokens\.css$/, /reminder\.css$/] },
   },
 });
