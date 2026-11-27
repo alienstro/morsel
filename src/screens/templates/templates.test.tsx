@@ -67,6 +67,69 @@ describe("TemplatesScreen", () => {
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
   });
 
+  it("hint_without_name_waits_for_a_name", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.change(screen.getByLabelText("Section 3 hint"), { target: { value: "what the customer asked for" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Give section 3 a name.");
+    const field = screen.getByLabelText("Section 3 name");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription("Give section 3 a name.");
+    expect(field).toHaveFocus();
+    expect(screen.getByLabelText("Section 1 name")).not.toHaveAttribute("aria-invalid", "true");
+    expect(calls("save_template")).toHaveLength(0);
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "Asks" } });
+    expect(field).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(calls("save_template")).toHaveLength(1));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+  });
+
+  it("hint_without_name_names_every_row", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.change(screen.getByLabelText("Section 1 name"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Section 4 hint"), { target: { value: "Who does what" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Give sections 1 and 4 a name\.$/);
+    expect(screen.getByLabelText("Section 4 name")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("empty_section_row_saves_without_error", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(calls("save_template")).toHaveLength(1));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("no_named_section_says_add_one", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Retro" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Add at least one section\.$/);
+    expect(calls("save_template")).toHaveLength(0);
+  });
+
+  it("no_template_name_says_name_it_first", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.click(screen.getByRole("button", { name: "New template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Give the template a name\.$/);
+    expect(calls("save_template")).toHaveLength(0);
+  });
+
   it("remove_section_drops_it", async () => {
     renderTemplates();
     fireEvent.click(await screen.findByRole("button", { name: /Product sync/ }));

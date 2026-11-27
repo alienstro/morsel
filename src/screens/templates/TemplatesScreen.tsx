@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { useLeaveGuard } from "../../app/useLeaveGuard";
 import { api, errorMessage, type Section, type Template, type TemplateInput } from "../../lib/api";
+import { joinNames } from "../../lib/calendar";
 import "../library.css";
 
 const GENERAL_ID = 1;
@@ -12,6 +13,9 @@ function usageLabel(t: Template): string {
   if (t.uses === 0) return "Not used yet";
   return t.uses === 1 ? "Used 1 time" : `Used ${t.uses} times`;
 }
+
+// The backend drops a section with no name, so a hint alone would go away with no message (#35).
+const nameless = (s: Section) => !s.name.trim() && !!s.hint.trim();
 
 function toInput(t: Template): TemplateInput {
   return { name: t.name, description: t.description, sections: t.sections.map((s) => ({ ...s })), instructions: t.instructions };
@@ -28,12 +32,17 @@ export function TemplatesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<"delete" | "reset" | null>(null);
   const [pending, setPending] = useState<(() => void) | null>(null);
+  // True after a save that found a section with a hint but no name: marks those rows (#35).
+  const [checkNames, setCheckNames] = useState(false);
 
   const current = templates.find((t) => t.id === selected) ?? null;
   const dirty = JSON.stringify(form) !== JSON.stringify(current ? toInput(current) : EMPTY);
   // Ask before an action or a link replaces the form and drops edits that are not saved (#22).
   const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
   const { leaveTo, leave, stay } = useLeaveGuard(dirty);
+  const namelessRows = checkNames ? form.sections.flatMap((s, i) => (nameless(s) ? [String(i + 1)] : [])) : [];
+  // The message follows the rows, so it goes away when the user types the last name (#35).
+  const alertText = error ?? (namelessRows.length === 0 ? null : `Give ${namelessRows.length === 1 ? "section" : "sections"} ${joinNames(namelessRows)} a name.`);
 
   const load = async (select?: number | null) => {
     try {
@@ -59,6 +68,7 @@ export function TemplatesScreen() {
     setForm(toInput(t));
     setInfo(null);
     setError(null);
+    setCheckNames(false);
   };
 
   const startNew = () => {
@@ -66,6 +76,7 @@ export function TemplatesScreen() {
     setForm({ ...EMPTY, sections: [{ name: "", hint: "" }] });
     setInfo(null);
     setError(null);
+    setCheckNames(false);
   };
 
   const setSection = (i: number, patch: Partial<Section>) =>
@@ -94,6 +105,20 @@ export function TemplatesScreen() {
 
   const save = (e: FormEvent) => {
     e.preventDefault();
+    const first = form.sections.findIndex(nameless);
+    // Check the template name first, in the same order as the backend (#35).
+    const problem = !form.name.trim()
+      ? "Give the template a name."
+      : first >= 0 || form.sections.some((s) => s.name.trim())
+        ? null
+        : "Add at least one section.";
+    setCheckNames(first >= 0);
+    if (problem || first >= 0) {
+      setInfo(null);
+      setError(problem);
+      if (!problem) e.currentTarget.querySelectorAll<HTMLInputElement>(".section-row input:first-child")[first]?.focus();
+      return;
+    }
     void run(() => api.saveTemplate(selected, form), "Saved.");
   };
 
@@ -141,7 +166,7 @@ export function TemplatesScreen() {
           <legend>Sections</legend>
           {form.sections.map((s, i) => (
             <div key={i} className="section-row">
-              <input aria-label={`Section ${i + 1} name`} className="tpl-input" placeholder="Section name" value={s.name} onChange={(e) => setSection(i, { name: e.target.value })} />
+              <input aria-label={`Section ${i + 1} name`} aria-invalid={checkNames && nameless(s)} aria-describedby={checkNames && nameless(s) ? "tpl-error" : undefined} className="tpl-input" placeholder="Section name" value={s.name} onChange={(e) => setSection(i, { name: e.target.value })} />
               <input aria-label={`Section ${i + 1} hint`} className="tpl-input" placeholder="What it holds (optional)" value={s.hint} onChange={(e) => setSection(i, { hint: e.target.value })} />
               <button type="button" className="icon-btn-light" aria-label={`Move ${s.name || `section ${i + 1}`} up`} disabled={i === 0} onClick={() => moveSection(i, -1)}>
                 <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" {...stroke}><path d="M6 15l6-6 6 6" /></svg>
@@ -165,7 +190,7 @@ export function TemplatesScreen() {
           <textarea id="tpl-ai" rows={4} className="tpl-textarea" value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} />
         </div>
 
-        {error && <p role="alert" className="error-text">{error}</p>}
+        {alertText && <p id="tpl-error" role="alert" className="error-text">{alertText}</p>}
         {info && <p role="status" className="muted small">{info}</p>}
 
         <div className="row">
