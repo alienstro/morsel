@@ -6,7 +6,9 @@ use super::prompt::{
 };
 use crate::chat_model::ChatModel;
 use crate::db::SharedDb;
-use crate::db::meetings::{UNTITLED, get_meeting, record_usage, save_note, set_status, set_title};
+use crate::db::meetings::{
+    UNTITLED, get_meeting, record_usage, save_note, set_notes_error, set_status, set_title,
+};
 use crate::db::templates;
 use crate::events::{EventSink, NOTES_DONE, NOTES_FAILED, STATUS};
 use crate::llm::ChatMessage;
@@ -71,6 +73,11 @@ pub async fn write_notes(
         }
         Err(MorselError::Cancelled) => ctx.set(id, MeetingStatus::NotesCancelled),
         Err(err) => {
+            if let Err(db_err) =
+                set_notes_error(&ctx.db.lock().expect("db lock"), id, &err.to_string())
+            {
+                eprintln!("cannot save the notes error: {db_err}");
+            }
             ctx.set(id, MeetingStatus::NotesFailed);
             ctx.sink.emit(
                 NOTES_FAILED,
@@ -379,6 +386,7 @@ mod tests {
             (detail.user_notes.as_str(), detail.lines.len()),
             ("budget ok", 2)
         );
+        assert!(detail.notes_error.is_some());
         write_notes(&f.ctx, f.id, 1, CancellationToken::new())
             .await
             .unwrap();

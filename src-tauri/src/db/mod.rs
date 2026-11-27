@@ -25,6 +25,7 @@ pub(crate) fn migrations() -> Vec<M<'static>> {
         M::up_with_hook(include_str!("migrations_2.sql"), templates::write_built_ins),
         M::up(include_str!("migrations_3.sql")),
         M::up(include_str!("migrations_4.sql")),
+        M::up(include_str!("migrations_5.sql")),
     ]
 }
 

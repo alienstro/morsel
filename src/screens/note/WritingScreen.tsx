@@ -30,7 +30,10 @@ export function WritingScreen() {
       if (!alive) return;
       setDetail(d);
       if (d.summary.status === "done") navigate(`/note/${id}`, { replace: true });
-      if (d.summary.status === "notes_failed") setPhase("failed");
+      if (d.summary.status === "notes_failed") {
+        setMessage(d.notesError ?? "");
+        setPhase("failed");
+      }
       if (d.summary.status === "notes_cancelled") setPhase("cancelled");
       if (d.summary.status === "transcribing") setPhase("transcribing");
     }).catch((e) => setMessage(errorMessage(e)));

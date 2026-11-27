@@ -58,10 +58,49 @@ describe("Settings", () => {
     expect(await screen.findByText("home page")).toBeInTheDocument();
   });
 
+  it("models_edits_ask_before_leaving", async () => {
+    renderAt("/settings/models");
+    fireEvent.change(await screen.findByLabelText('Meeting language ("auto" detects it)'), { target: { value: "en" } });
+    const nav = screen.getByRole("navigation", { name: "Settings" });
+    fireEvent.click(within(nav).getByRole("link", { name: "Transcription" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("link", { name: "Privacy and data" }));
+    const dialog = screen.getByRole("dialog", { name: "Discard your changes?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText('Meeting language ("auto" detects it)')).toHaveValue("en");
+    fireEvent.click(within(nav).getByRole("link", { name: "Back to Morsel" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
+    expect(await screen.findByText("home page")).toBeInTheDocument();
+  });
+
+  it("models_with_reverted_edits_leave_at_once", async () => {
+    renderAt("/settings/models");
+    const language = await screen.findByLabelText('Meeting language ("auto" detects it)');
+    fireEvent.change(language, { target: { value: "en" } });
+    fireEvent.change(language, { target: { value: "auto" } });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "Privacy and data" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Export" })).toBeInTheDocument();
+  });
+
+  it("models_after_save_leave_at_once", async () => {
+    renderAt("/settings/models");
+    const language = await screen.findByLabelText('Meeting language ("auto" detects it)');
+    const nav = screen.getByRole("navigation", { name: "Settings" });
+    fireEvent.change(language, { target: { value: "en" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("link", { name: "Privacy and data" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Export" })).toBeInTheDocument();
+  });
+
   it("privacy_shows_data_info", async () => {
     renderAt("/settings/privacy");
     expect(await screen.findByText(`${DATA}, 48 notes, 6 MB`)).toBeInTheDocument();
-    expect(screen.getByText("Morsel never saves audio. It keeps only the text.")).toBeInTheDocument();
+    expect(screen.getByText("Morsel keeps the audio of each meeting on this Mac until you delete it. Delete it from the note, or delete all data below.")).toBeInTheDocument();
+    expect(screen.queryByText(/never saves audio/)).not.toBeInTheDocument();
+    expect(screen.getByText("Delete all notes, transcripts, audio and keys")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
     await waitFor(() => expect(reveal).toHaveBeenCalledWith(DATA));
   });
@@ -87,6 +126,7 @@ describe("Settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete all data" }));
     const dialog = screen.getByRole("dialog", { name: "Delete all data?" });
     expect(within(dialog).getByText(/You cannot undo this./)).toBeInTheDocument();
+    expect(within(dialog).getByText(/meeting audio/)).toBeInTheDocument();
     expect(invoke.mock.calls.some(([c]) => c === "delete_all_data")).toBe(false);
     responses.data_info = { path: DATA, notes: 0, bytes: 40_960 };
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete all data" }));

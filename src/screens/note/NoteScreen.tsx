@@ -1,9 +1,11 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { type ReactNode, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmDialog } from "../../app/ConfirmDialog";
 import { api, clock, errorMessage, type MeetingDetail, type Template } from "../../lib/api";
+import { formatWhen } from "../../lib/dates";
 import { markYours, type NotePart } from "../../lib/markYours";
+import { LIVE } from "../notes/NotesScreen";
 import "./note.css";
 
 const HEADING = /^#{1,3}\s+(.*)$/;
@@ -56,10 +58,17 @@ export function NoteScreen() {
   const [confirmingAudio, setConfirmingAudio] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     api.getMeeting(id).then((d) => {
+      if (!alive) return;
       // The after job still transcribes this meeting: the writing page shows its progress.
       if (d.summary.status === "transcribing") {
         navigate(`/meeting/${id}/writing`, { replace: true });
+        return;
+      }
+      // A live meeting has no notes yet: the meeting screen stops it first (#18).
+      if (LIVE.includes(d.summary.status)) {
+        navigate(`/meeting/${id}`, { replace: true });
         return;
       }
       setDetail(d);
@@ -67,6 +76,9 @@ export function NoteScreen() {
     }).catch((e) => setInfo(errorMessage(e)));
     api.listTemplates().then(setTemplates).catch(() => {});
     api.audioSize(id).then(setAudioBytes).catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [id, navigate]);
 
   const deleteAudio = async () => {
@@ -80,9 +92,12 @@ export function NoteScreen() {
     }
   };
 
-  if (!detail) return <p className="muted page">{info ?? "Loading the note…"}</p>;
+  if (!detail) {
+    return <p className="muted page">{info ?? "Loading the note…"}{info && <> <Link to="/notes">Back to Notes</Link></>}</p>;
+  }
 
   const note = detail.note;
+  const status = detail.summary.status;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(note ?? "");
@@ -124,7 +139,7 @@ export function NoteScreen() {
     <div className="page">
       <h1 className="serif page-title">{detail.summary.title}</h1>
       <div className="row muted small">
-        <span>{new Date(detail.summary.startedAt).toLocaleString()}</span>
+        <span>{formatWhen(detail.summary.startedAt)}</span>
         <span className="chip">{detail.summary.templateName}</span>
       </div>
       <div className="row">
@@ -135,12 +150,18 @@ export function NoteScreen() {
         <select id="template" value={templateId ?? ""} onChange={(e) => setTemplateId(Number(e.target.value))}>
           {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
-        <button type="button" className="btn btn-primary" onClick={writeAgain}>{note ? "Write again" : "Write notes"}</button>
+        <button type="button" className="btn btn-primary" onClick={writeAgain}>
+          {status === "notes_failed" ? "Try again" : note ? "Write again" : "Write notes"}
+        </button>
         <button type="button" className="icon-btn-light" aria-label="Delete note" onClick={() => setConfirming(true)}>
           <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
         </button>
       </div>
       {info && <p role="status" className="muted small">{info}</p>}
+      {status === "notes_failed" && (
+        <p role="alert" className="error-text">Morsel could not write the notes: {detail.notesError || "unknown error"}</p>
+      )}
+      {status === "notes_cancelled" && <p className="muted">You cancelled the notes.</p>}
       {note ? (
         <>
           <p className="legend small">
@@ -150,7 +171,7 @@ export function NoteScreen() {
           <NoteBody parts={markYours(note, detail.userNotes)} />
         </>
       ) : (
-        <p className="muted">This meeting has no notes yet.</p>
+        status !== "notes_failed" && status !== "notes_cancelled" && <p className="muted">This meeting has no notes yet.</p>
       )}
       <details className="transcript">
         <summary>Transcript ({detail.lines.length} lines)</summary>

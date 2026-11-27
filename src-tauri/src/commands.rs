@@ -609,6 +609,9 @@ impl AppState {
 
     fn fail_after_job(&self, id: MeetingId, err: &MorselError) {
         eprintln!("the after job of meeting {id} failed: {err}");
+        if let Err(db_err) = meetings::set_notes_error(&self.conn(), id, &err.to_string()) {
+            eprintln!("cannot save the notes error: {db_err}");
+        }
         if let Err(status_err) = self.set_status(id, MeetingStatus::NotesFailed) {
             eprintln!("cannot set the meeting status: {status_err}");
         }
@@ -1309,6 +1312,8 @@ mod tests {
             "{}",
             failure_of(&sink, id)
         );
+        let saved = s.get_meeting(id).unwrap().notes_error.unwrap_or_default();
+        assert!(saved.contains("notes API key"), "{saved}");
     }
 
     #[tokio::test]
