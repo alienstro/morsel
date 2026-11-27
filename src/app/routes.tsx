@@ -7,7 +7,7 @@ import { NoteScreen } from "../screens/note/NoteScreen";
 import { SettingsModelsScreen } from "../screens/SettingsModelsScreen";
 import { WritingScreen } from "../screens/note/WritingScreen";
 import { AskScreen } from "../screens/ask/AskScreen";
-import { NotesScreen } from "../screens/notes/NotesScreen";
+import { meetingPath, NotesScreen } from "../screens/notes/NotesScreen";
 import { SettingsLayout } from "../screens/settings/SettingsLayout";
 import { SettingsCalendarScreen } from "../screens/settings/SettingsCalendarScreen";
 import { SettingsShortcutsScreen } from "../screens/settings/SettingsShortcutsScreen";
@@ -28,7 +28,7 @@ function ShellLayout() {
   const [noteCount, setNoteCount] = useState(0);
 
   useEffect(() => {
-    api.listMeetings(3).then((m) => setRecent(m.map(({ id, title }) => ({ id, title })))).catch(() => {});
+    api.listMeetings(3).then((m) => setRecent(m.map((s) => ({ id: s.id, title: s.title, path: meetingPath(s) })))).catch(() => {});
     api.searchNotes({ limit: 0, offset: 0 }).then((p) => setNoteCount(p.total)).catch(() => {});
   }, [pathname]);
 
