@@ -32,8 +32,15 @@ function ShellLayout() {
     api.searchNotes({ limit: 0, offset: 0 }).then((p) => setNoteCount(p.total)).catch(() => {});
   }, [pathname]);
 
+  // #28: only one meeting records at a time, so a live meeting is the newest one.
+  const newNote = async () => {
+    const [last] = await api.listMeetings(1).catch(() => []);
+    if (last && ["recording", "paused"].includes(last.status)) navigate(`/meeting/${last.id}`);
+    else navigate("/", { state: { newNote: true } });
+  };
+
   return (
-    <AppShell recent={recent} noteCount={noteCount} onNewNote={() => navigate("/")}>
+    <AppShell recent={recent} noteCount={noteCount} onNewNote={newNote}>
       <UpdateBar />
       <Outlet />
     </AppShell>

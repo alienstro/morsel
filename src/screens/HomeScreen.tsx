@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api, errorMessage, needsSettings, onCalendarChanged, onStatus, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
@@ -23,6 +23,9 @@ function groupByDay(meetings: MeetingSummary[]): [string, MeetingSummary[]][] {
 /** Home: the next calendar meeting (or a plain start), recent notes, and the Ask box. */
 export function HomeScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const titleRef = useRef<HTMLInputElement>(null);
+  const startRef = useRef<HTMLButtonElement>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -81,6 +84,19 @@ export function HomeScreen() {
   const event = unscheduled ? null : next;
   // One meeting records at a time and the list is newest first, so it holds the live one (#25).
   const live = meetings.find((m) => LIVE.includes(m.status));
+  const hasEvent = event !== null;
+
+  // #28: the sidebar "New note" button sends { newNote: true }. The event card has no title field.
+  // A later card swap refocuses only when focus fell to the body, so it never takes focus from a field.
+  const focusedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!(location.state as { newNote?: boolean } | null)?.newNote) return;
+    if (focusedKey.current === location.key && document.activeElement !== document.body) return;
+    const target = titleRef.current ?? startRef.current;
+    if (!target) return;
+    focusedKey.current = location.key;
+    target.focus();
+  }, [location.key, location.state, hasEvent, loaded]);
 
   const start = async () => {
     setError(null);
@@ -123,14 +139,14 @@ export function HomeScreen() {
             ) : (
               <>
                 <label htmlFor="title" className="sr-only">Meeting title</label>
-                <input id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <input ref={titleRef} id="title" className="text-input" placeholder="Meeting title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
               </>
             )}
             <label htmlFor="template" className="sr-only">Template</label>
             <select id="template" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button type="button" className="btn btn-primary" onClick={start} disabled={starting}>
+            <button ref={startRef} type="button" className="btn btn-primary" onClick={start} disabled={starting}>
               <span aria-hidden="true" className="dot" />
               Start notes
             </button>
