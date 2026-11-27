@@ -61,7 +61,9 @@ describe("Settings", () => {
   it("privacy_shows_data_info", async () => {
     renderAt("/settings/privacy");
     expect(await screen.findByText(`${DATA}, 48 notes, 6 MB`)).toBeInTheDocument();
-    expect(screen.getByText("Morsel never saves audio. It keeps only the text.")).toBeInTheDocument();
+    expect(screen.getByText("Morsel keeps the audio of each meeting on this Mac until you delete it. Delete it from the note, or delete all data below.")).toBeInTheDocument();
+    expect(screen.queryByText(/never saves audio/)).not.toBeInTheDocument();
+    expect(screen.getByText("Delete all notes, transcripts, audio and keys")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
     await waitFor(() => expect(reveal).toHaveBeenCalledWith(DATA));
   });
@@ -87,6 +89,7 @@ describe("Settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete all data" }));
     const dialog = screen.getByRole("dialog", { name: "Delete all data?" });
     expect(within(dialog).getByText(/You cannot undo this./)).toBeInTheDocument();
+    expect(within(dialog).getByText(/meeting audio/)).toBeInTheDocument();
     expect(invoke.mock.calls.some(([c]) => c === "delete_all_data")).toBe(false);
     responses.data_info = { path: DATA, notes: 0, bytes: 40_960 };
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete all data" }));
