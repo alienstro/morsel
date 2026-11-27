@@ -129,8 +129,8 @@ v1 has five built-in templates: General, 1:1, Sales call, Stand-up, Product sync
 
 - API keys stay in the Keychain (service `app.morsel`) in release builds, and in `secrets.json` (mode 0600) in debug builds. They never go to the frontend, to a log, or to the database.
 - Tauri capabilities give the main window only the Morsel commands and the events it needs.
-- No audio on disk (section 5).
-- "Export all data" writes every note as Markdown to a folder that the user selects. "Delete all data" deletes the database and the keys, after the warning "You cannot undo this."
+- Morsel keeps the audio of each meeting on the Mac until the user deletes it (section 5).
+- "Export all data" writes every note as Markdown to a folder that the user selects. "Delete all data" deletes the database, the saved audio and the keys, after the warning "You cannot undo this."
 - Morsel sends no analytics.
 
 ## 14. Errors
