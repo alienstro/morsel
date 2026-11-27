@@ -77,10 +77,13 @@ describe("AskScreen", () => {
   });
 
   it("error_shows_message", async () => {
-    responses.ask = () => Promise.reject({ code: "invalid", message: "add the notes API key in Settings first" });
+    responses.ask = () => Promise.reject({ code: "invalid", message: "invalid value: download the notes model in Settings first" });
     renderAt("/ask");
     fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "anything" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("add the notes API key in Settings first");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Download the notes model in Settings first.");
+    expect(alert).not.toHaveTextContent("invalid value");
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings/models");
   });
 });

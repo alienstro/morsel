@@ -88,6 +88,18 @@ describe("HomeScreen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("microphone permission");
   });
+
+  it("missing_model_error_is_plain_and_links_to_settings", async () => {
+    responses.start_meeting = () =>
+      Promise.reject({ code: "invalid", message: "invalid value: download the transcription model in Settings first" });
+    renderAt("/");
+    fireEvent.click(await screen.findByRole("button", { name: "Start notes" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Download the transcription model in Settings first.");
+    expect(alert).not.toHaveTextContent("invalid value");
+    fireEvent.click(screen.getByRole("link", { name: "Open Settings" }));
+    expect(await screen.findByLabelText("Notes API key")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsModelsScreen", () => {
@@ -107,7 +119,7 @@ describe("SettingsModelsScreen", () => {
     expect(await screen.findByText("The key works.")).toBeInTheDocument();
     responses.test_notes_key = () => Promise.reject({ code: "invalid_key", message: "the API key is not valid" });
     fireEvent.click(screen.getByRole("button", { name: "Test key" }));
-    expect(await screen.findByText("the API key is not valid")).toBeInTheDocument();
+    expect(await screen.findByText("The API key is not valid.")).toBeInTheDocument();
   });
 
   it("download_shows_progress_from_events", async () => {

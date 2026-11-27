@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { api, errorMessage, type AskAnswer, type AskRange } from "../../lib/api";
+import { api, errorMessage, needsSettings, type AskAnswer, type AskRange } from "../../lib/api";
 import { dayMonth } from "../../lib/dates";
 import "../library.css";
 import { AnswerText } from "./AnswerText";
@@ -101,7 +101,7 @@ export function AskScreen() {
               )}
             </div>
           )}
-          {error && <p role="alert" className="error-text">{error}</p>}
+          {error && <p role="alert" className="error-text">{error}{needsSettings(error) && <> <Link to="/settings/models">Open Settings</Link></>}</p>}
         </div>
         <form className="ask-form" onSubmit={submit}>
           <label htmlFor="ask-q" className="sr-only">Ask about your meetings</label>

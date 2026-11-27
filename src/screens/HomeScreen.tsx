@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { api, errorMessage, onCalendarChanged, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
+import { api, errorMessage, needsSettings, onCalendarChanged, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
 import "./library.css";
@@ -118,7 +118,7 @@ export function HomeScreen() {
       {event && (
         <button type="button" className="btn btn-link next-skip" onClick={() => setUnscheduled(true)}>Start a note without the calendar</button>
       )}
-      {error && <p role="alert" className="error-text">{error}</p>}
+      {error && <p role="alert" className="error-text">{error}{needsSettings(error) && <> <Link to="/settings/models">Open Settings</Link></>}</p>}
       <section aria-labelledby="earlier">
         <div className="section-head">
           <h2 id="earlier" className="section-title">Earlier notes</h2>
