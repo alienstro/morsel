@@ -93,11 +93,36 @@ describe("TemplatesScreen", () => {
     await screen.findByText("Used 14 times");
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    await waitFor(() => expect(calls("reset_template")).toEqual([{ id: 1 }]));
     fireEvent.click(screen.getByRole("button", { name: /Design crit/ }));
     expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("reset_asks_first", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "My own rules." } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    const dialog = screen.getByRole("dialog", { name: "Reset this template?" });
+    expect(calls("reset_template")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset template" }));
+    await waitFor(() => expect(calls("reset_template")).toEqual([{ id: 1 }]));
+    expect(await screen.findByText("Reset to the built-in values.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("Be clear.");
+  });
+
+  it("reset_cancel_and_escape_keep_the_user_version", async () => {
+    renderTemplates();
+    await screen.findByText("Used 14 times");
+    fireEvent.change(screen.getByLabelText("Instructions for the AI"), { target: { value: "My own rules." } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls("reset_template")).toHaveLength(0);
+    expect(screen.getByLabelText("Instructions for the AI")).toHaveValue("My own rules.");
   });
 
   it("delete_asks_first", async () => {

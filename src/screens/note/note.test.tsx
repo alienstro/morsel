@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { markYours } from "../../lib/markYours";
 import { emit, invoke, resetTauri, responses } from "../../test/tauri";
 import { NoteScreen } from "./NoteScreen";
@@ -88,6 +88,28 @@ describe("WritingScreen", () => {
 });
 
 describe("NoteScreen", () => {
+  // A fixed clock keeps "Today" and "Yesterday" true when the run crosses midnight.
+  const today = new Date(2026, 10, 27, 12, 0);
+  const at = (daysBack: number, h: number, m: number) =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - daysBack, h, m).getTime();
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(today);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [at(0, 20, 45), "Today, 20:45"],
+    [at(1, 16, 30), "Yesterday, 16:30"],
+    [new Date(2026, 10, 2, 9, 30).getTime(), "Mon 2 Nov, 09:30"],
+  ])("note_page_shows_the_date_as_notes_does (%s -> %s)", async (startedAt, expected) => {
+    responses.get_meeting = { summary: { ...summary, status: "done", startedAt }, lines: [], userNotes: "", note: "x" };
+    renderAt("/note/1");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+
   it("note_screen_renders_legend_and_grey_lines", async () => {
     responses.get_meeting = {
       summary: { ...summary, status: "done" },
@@ -141,6 +163,15 @@ describe("NoteScreen", () => {
     renderAt("/note/1");
     expect(await screen.findByText("Transcribing the audio…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write notes" })).not.toBeInTheDocument();
+  });
+
+  it("deleted_note_says_so_and_links_back_to_notes", async () => {
+    responses.get_meeting = () => Promise.reject({ code: "not_found", message: "not found: meeting 1" });
+    renderAt("/note/1");
+    expect(await screen.findByText("This note was deleted.")).toBeInTheDocument();
+    expect(screen.queryByText(/not found/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Back to Notes" }));
+    expect(await screen.findByText("notes page")).toBeInTheDocument();
   });
 
   it("note_page_has_no_audio_button_without_audio", async () => {

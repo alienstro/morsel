@@ -23,6 +23,7 @@ function KeyField({ account, label }: KeyFieldProps) {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     api.hasApiKey(account).then(setSaved).catch(() => {});
@@ -34,7 +35,19 @@ function KeyField({ account, label }: KeyFieldProps) {
       setValue("");
       const has = await api.hasApiKey(account);
       setSaved(has);
-      setMessage(has ? "Saved in the Keychain." : "The key is deleted.");
+      setMessage(has ? "Saved in the Keychain." : "The key is not saved.");
+    } catch (e) {
+      setMessage(errorMessage(e));
+    }
+  };
+
+  // The backend deletes a key when it gets an empty value (issue #20).
+  const remove = async () => {
+    setConfirming(false);
+    try {
+      await api.setApiKey(account, "");
+      setSaved(false);
+      setMessage("The key is removed.");
     } catch (e) {
       setMessage(errorMessage(e));
     }
@@ -46,9 +59,19 @@ function KeyField({ account, label }: KeyFieldProps) {
       <div className="row">
         <input id={account} type="password" autoComplete="off" className="text-input" value={value}
           placeholder={saved ? "Saved. Type a new key to replace it." : "Paste your key"} onChange={(e) => setValue(e.target.value)} />
-        <button type="button" className="btn" onClick={save}>Save key</button>
+        <button type="button" className="btn" onClick={save} disabled={!value.trim()}>Save key</button>
+        {saved && <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Remove key</button>}
       </div>
       <span className="muted small">{message ?? (saved ? "A key is saved." : "No key is saved.")}</span>
+      {confirming && (
+        <ConfirmDialog
+          title={`Remove the ${label}?`}
+          body="Morsel deletes this key from the Keychain. You cannot undo this."
+          confirmLabel="Remove key"
+          onConfirm={remove}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </div>
   );
 }

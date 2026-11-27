@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { Link, MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke, resetTauri, responses } from "../../test/tauri";
 import { AskScreen } from "./AskScreen";
@@ -28,9 +28,16 @@ beforeEach(() => {
   responses.get_ask = { ...answer, id: 2, question: "What did we decide on pricing?", answer: "Ten percent off.", sources: [] };
 });
 
+function Back() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate(-1)}>Back</button>;
+}
+
 function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
+      <Link to="/ask">Ask Morsel</Link>
+      <Back />
       <Routes>
         <Route path="/ask" element={<AskScreen />} />
         <Route path="/ask/:id" element={<AskScreen />} />
@@ -77,10 +84,76 @@ describe("AskScreen", () => {
   });
 
   it("error_shows_message", async () => {
-    responses.ask = () => Promise.reject({ code: "invalid", message: "add the notes API key in Settings first" });
+    responses.ask = () => Promise.reject({ code: "invalid", message: "invalid value: download the notes model in Settings first" });
     renderAt("/ask");
     fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "anything" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("add the notes API key in Settings first");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Download the notes model in Settings first.");
+    expect(alert).not.toHaveTextContent("invalid value");
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings/models");
+  });
+
+  it("sidebar_link_opens_empty_page", async () => {
+    renderAt("/ask/2");
+    expect(await screen.findByText("Ten percent off.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Ask Morsel" }));
+    expect(await screen.findByText(/Ask a question about your meetings/)).toBeInTheDocument();
+    expect(screen.queryByText("Ten percent off.")).not.toBeInTheDocument();
+  });
+
+  it("new_question_clears_page_and_focuses_input", async () => {
+    renderAt("/ask/2");
+    expect(await screen.findByText("Ten percent off.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    expect(await screen.findByText(/Ask a question about your meetings/)).toBeInTheDocument();
+    expect(screen.queryByText("Ten percent off.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Ask about your meetings")).toHaveFocus();
+  });
+
+  it("new_question_while_loading_keeps_answer_in_history_only", async () => {
+    let resolve: (a: typeof answer) => void = () => {};
+    responses.ask = () => new Promise((r) => { resolve = r; });
+    renderAt("/ask");
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    resolve(answer);
+    expect(await screen.findByRole("link", { name: answer.question })).toBeInTheDocument();
+    expect(screen.queryByText("Acme thinks the price is fair for the first year.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText(/Ask a question about your meetings/)).toBeInTheDocument();
+  });
+
+  it("back_after_new_question_shows_earlier_answer", async () => {
+    renderAt("/ask/2");
+    expect(await screen.findByText("Ten percent off.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    expect(await screen.findByText(/Ask a question about your meetings/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByText("Ten percent off.")).toBeInTheDocument();
+  });
+  it("sidebar_link_after_load_error_clears_error", async () => {
+    responses.get_ask = () => Promise.reject({ code: "not_found", message: "no such question" });
+    renderAt("/ask/9");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Ask Morsel" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("earlier_question_while_loading_keeps_earlier_page", async () => {
+    let resolve: (a: typeof answer) => void = () => {};
+    responses.ask = () => new Promise((r) => { resolve = r; });
+    renderAt("/ask");
+    fireEvent.change(screen.getByLabelText("Ask about your meetings"), { target: { value: "price?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "What did we decide on pricing?" }));
+    expect(await screen.findByText("Ten percent off.")).toBeInTheDocument();
+    resolve(answer);
+    expect(await screen.findByRole("link", { name: answer.question })).toBeInTheDocument();
+    expect(screen.getByText("Ten percent off.")).toBeInTheDocument();
+    expect(screen.queryByText("Acme thinks the price is fair for the first year.")).not.toBeInTheDocument();
   });
 });
