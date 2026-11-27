@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { api, errorMessage, onCalendarChanged, onStatus, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
+import { api, errorMessage, needsSettings, onCalendarChanged, onStatus, type CalendarEvent, type MeetingSummary, type Template } from "../lib/api";
 import { eventLine } from "../lib/calendar";
 import { clockTime, dayLabel } from "../lib/dates";
 import "./library.css";
@@ -140,7 +140,7 @@ export function HomeScreen() {
           )}
         </>
       )}
-      {error && <p role="alert" className="error-text">{error}</p>}
+      {error && <p role="alert" className="error-text">{error}{needsSettings(error) && <> <Link to="/settings/models">Open Settings</Link></>}</p>}
       <section aria-labelledby="earlier">
         <div className="section-head">
           <h2 id="earlier" className="section-title">Earlier notes</h2>
@@ -161,7 +161,7 @@ export function HomeScreen() {
                         {m.status === "paused" ? "Paused" : "Recording"}
                       </span>
                     )}
-                    <span className="muted small">{m.templateName}</span>
+                    <span className="truncate muted small" title={m.templateName} style={{ flexShrink: 0, maxWidth: "40%" }}>{m.templateName}</span>
                     <span className="muted small tabular" style={{ width: 40, textAlign: "right" }}>{clockTime(m.startedAt)}</span>
                   </Link>
                 </li>
